@@ -238,19 +238,7 @@ bool CCStockfishSearch(
 
         const std::string requestedFEN =
             (fen == nullptr || *fen == '\0') ? std::string(kStartFEN) : std::string(fen);
-        const auto positionError = engine->engine->set_position(
-            requestedFEN,
-            std::vector<std::string>{}
-        );
-        if (positionError.has_value()) {
-            engine->searching.store(false);
-            clearCallbacks(*engine->engine);
-            return fail(
-                std::string("FEN no válida: ") + positionError->what(),
-                error,
-                errorCap
-            );
-        }
+        engine->engine->set_position(requestedFEN, std::vector<std::string>{});
 
         Stockfish::Search::LimitsType limits;
         limits.startTime = Stockfish::now();
