@@ -213,6 +213,23 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertTrue(hints.isEmpty)
     }
 
+    func testBlunderModeKeepsNonBlundersSteadyAndWarnsOnlyWithFastBlink() {
+        XCTAssertEqual(
+            AssistanceMode.allCases,
+            [.off, .legalMoves, .stockfishQuality, .blunders]
+        )
+        XCTAssertTrue(AssistanceMode.blunders.requiresStockfishAnalysis)
+        XCTAssertEqual(AssistanceMode.blunders.ledPattern(for: .good), .steady)
+        XCTAssertEqual(AssistanceMode.blunders.ledPattern(for: .acceptable), .steady)
+        XCTAssertEqual(AssistanceMode.blunders.ledPattern(for: .blunder), .fastBlink)
+
+        let simulatedHints = AssistanceHintPlanner.hints(
+            for: [.d4, .a1, .h8, .c3],
+            mode: .blunders
+        )
+        XCTAssertTrue(simulatedHints.isEmpty)
+    }
+
     func testMoveQualityThresholdsMapToRequestedLEDPatterns() {
         let thresholds = MoveQualityThresholds()
 
@@ -556,6 +573,24 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(StockfishScore.mate(5).inverted, .mate(-5))
         XCTAssertGreaterThan(StockfishScore.mate(5).coachingValue, StockfishScore.centipawns(10_000).coachingValue)
         XCTAssertLessThan(StockfishScore.mate(-5).coachingValue, StockfishScore.centipawns(-10_000).coachingValue)
+    }
+
+    func testBlunderModeSummaryDoesNotRevealGoodVersusAcceptableMoves() {
+        let acceptable = StockfishMoveHint(
+            square: .e4,
+            quality: .acceptable,
+            moverScore: .centipawns(20),
+            centipawnLoss: 100
+        )
+        let blunder = StockfishMoveHint(
+            square: .d4,
+            quality: .blunder,
+            moverScore: .centipawns(-250),
+            centipawnLoss: 370
+        )
+
+        XCTAssertEqual(acceptable.detailText(for: .blunders), "e4 fijo/legal")
+        XCTAssertEqual(blunder.detailText(for: .blunders), "d4 rápido/blunder")
     }
 
     func testStockfish18AnalyzesRejectsInvalidFENAndRecovers() async throws {
