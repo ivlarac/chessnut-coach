@@ -1,5 +1,19 @@
 import Foundation
 
+enum ReplayPieceColor: Equatable, Sendable {
+    case white
+    case black
+}
+
+struct ReplayPiece: Equatable, Sendable {
+    let symbol: String
+    let color: ReplayPieceColor
+
+    // U+FE0E forces monochrome text presentation. Without it, iOS renders
+    // some chess characters (especially pawns) as multicolour emoji.
+    var textSymbol: String { symbol + "\u{FE0E}" }
+}
+
 enum GameReplay {
     static func fen(for record: GameRecord, afterPly ply: Int) -> String {
         guard ply > 0, !record.moves.isEmpty else { return record.initialFEN }
@@ -10,6 +24,41 @@ enum GameReplay {
         guard ply > 0, ply <= record.moves.count else { return nil }
         return record.moves[ply - 1]
     }
+
+    static func piece(in fen: String, rankIndex: Int, fileIndex: Int) -> ReplayPiece? {
+        guard (0..<8).contains(rankIndex), (0..<8).contains(fileIndex) else { return nil }
+        let rows = fen.split(separator: " ").first?.split(separator: "/") ?? []
+        guard rows.count == 8 else { return nil }
+
+        var expanded: [Character?] = []
+        for character in rows[rankIndex] {
+            if let count = character.wholeNumberValue {
+                expanded.append(contentsOf: Array(repeating: nil, count: count))
+            } else {
+                expanded.append(character)
+            }
+        }
+
+        guard expanded.indices.contains(fileIndex), let character = expanded[fileIndex] else {
+            return nil
+        }
+        return pieces[character]
+    }
+
+    private static let pieces: [Character: ReplayPiece] = [
+        "K": ReplayPiece(symbol: "♔", color: .white),
+        "Q": ReplayPiece(symbol: "♕", color: .white),
+        "R": ReplayPiece(symbol: "♖", color: .white),
+        "B": ReplayPiece(symbol: "♗", color: .white),
+        "N": ReplayPiece(symbol: "♘", color: .white),
+        "P": ReplayPiece(symbol: "♙", color: .white),
+        "k": ReplayPiece(symbol: "♚", color: .black),
+        "q": ReplayPiece(symbol: "♛", color: .black),
+        "r": ReplayPiece(symbol: "♜", color: .black),
+        "b": ReplayPiece(symbol: "♝", color: .black),
+        "n": ReplayPiece(symbol: "♞", color: .black),
+        "p": ReplayPiece(symbol: "♟", color: .black),
+    ]
 }
 
 enum PGNExporter {

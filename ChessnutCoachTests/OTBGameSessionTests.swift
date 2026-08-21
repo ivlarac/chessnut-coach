@@ -339,6 +339,36 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(GameReplay.fen(for: record, afterPly: 2), record.moves[1].fenAfter)
     }
 
+    func testReplayBoardUsesFENColorAndForcesTextPresentationForEveryPiece() throws {
+        let fen = Position.standard.fen
+
+        for file in 0..<8 {
+            let blackBackRank = try XCTUnwrap(
+                GameReplay.piece(in: fen, rankIndex: 0, fileIndex: file)
+            )
+            let blackPawn = try XCTUnwrap(
+                GameReplay.piece(in: fen, rankIndex: 1, fileIndex: file)
+            )
+            let whitePawn = try XCTUnwrap(
+                GameReplay.piece(in: fen, rankIndex: 6, fileIndex: file)
+            )
+            let whiteBackRank = try XCTUnwrap(
+                GameReplay.piece(in: fen, rankIndex: 7, fileIndex: file)
+            )
+
+            XCTAssertEqual(blackBackRank.color, .black)
+            XCTAssertEqual(blackPawn.color, .black)
+            XCTAssertEqual(whitePawn.color, .white)
+            XCTAssertEqual(whiteBackRank.color, .white)
+            XCTAssertEqual(blackBackRank.textSymbol.unicodeScalars.last?.value, 0xFE0E)
+            XCTAssertEqual(blackPawn.textSymbol.unicodeScalars.last?.value, 0xFE0E)
+            XCTAssertEqual(whitePawn.textSymbol.unicodeScalars.last?.value, 0xFE0E)
+            XCTAssertEqual(whiteBackRank.textSymbol.unicodeScalars.last?.value, 0xFE0E)
+        }
+
+        XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))
+    }
+
     func testLEDFrameComposerKeepsSteadyWhileBlinkPatternsChange() {
         let hints = [
             LEDHint(square: .a1, pattern: .steady),

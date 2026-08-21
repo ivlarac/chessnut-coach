@@ -267,9 +267,20 @@ private struct ReplayBoardView: View {
                         ForEach(0..<8, id: \.self) { file in
                             ZStack {
                                 ((rank + file).isMultiple(of: 2) ? Color.boardLight : Color.boardDark)
-                                Text(piece(atRank: rank, file: file))
-                                    .font(.system(size: squareSize * 0.72))
-                                    .minimumScaleFactor(0.5)
+                                if let piece = GameReplay.piece(
+                                    in: fen,
+                                    rankIndex: rank,
+                                    fileIndex: file
+                                ) {
+                                    Text(piece.textSymbol)
+                                        .font(.system(size: squareSize * 0.72, design: .serif))
+                                        .foregroundStyle(piece.foregroundColor)
+                                        .shadow(
+                                            color: piece.contrastColor.opacity(0.65),
+                                            radius: 1
+                                        )
+                                        .minimumScaleFactor(0.5)
+                                }
                             }
                             .frame(width: squareSize, height: squareSize)
                         }
@@ -279,28 +290,16 @@ private struct ReplayBoardView: View {
         }
         .accessibilityLabel("Tablero en el medio movimiento \(fen)")
     }
+}
 
-    private func piece(atRank rank: Int, file: Int) -> String {
-        let rows = fen.split(separator: " ").first?.split(separator: "/") ?? []
-        guard rows.count == 8 else { return "" }
-
-        var expanded: [Character?] = []
-        for character in rows[rank] {
-            if let count = character.wholeNumberValue {
-                expanded.append(contentsOf: Array(repeating: nil, count: count))
-            } else {
-                expanded.append(character)
-            }
-        }
-
-        guard expanded.indices.contains(file), let piece = expanded[file] else { return "" }
-        return Self.symbols[piece] ?? ""
+private extension ReplayPiece {
+    var foregroundColor: Color {
+        color == .white ? .white : .black
     }
 
-    private static let symbols: [Character: String] = [
-        "K": "♔", "Q": "♕", "R": "♖", "B": "♗", "N": "♘", "P": "♙",
-        "k": "♚", "q": "♛", "r": "♜", "b": "♝", "n": "♞", "p": "♟",
-    ]
+    var contrastColor: Color {
+        color == .white ? .black : .white
+    }
 }
 
 private struct PGNFileDocument: FileDocument {
