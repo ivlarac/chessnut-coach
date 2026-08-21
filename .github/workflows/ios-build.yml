@@ -30,36 +30,5 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Run unit tests
-        run: |
-          SIMULATOR_ID="$(python3 - <<'PY'
-          import json
-          import subprocess
-
-          payload = json.loads(
-              subprocess.check_output(
-                  ["xcrun", "simctl", "list", "devices", "available", "-j"],
-                  text=True,
-              )
-          )
-
-          for runtime, devices in payload["devices"].items():
-              if "iOS" not in runtime:
-                  continue
-              for device in devices:
-                  if device.get("isAvailable") and device["name"].startswith("iPhone"):
-                      print(device["udid"])
-                      raise SystemExit(0)
-
-          raise SystemExit("No available iPhone simulator found")
-          PY
-          )"
-
-          xcodebuild \
-            -project ChessnutCoach.xcodeproj \
-            -scheme ChessnutCoach \
-            -sdk iphonesimulator \
-            -destination "platform=iOS Simulator,id=${SIMULATOR_ID}" \
-            -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO \
-            test
+      - name: Run game-core unit tests
+        run: swift test
