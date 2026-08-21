@@ -141,6 +141,136 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
     var moveCount: Int { moves.count }
 }
 
+enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    case off
+    case legalMoves
+    case simulatedQuality
+
+    var id: String { rawValue }
+
+    var displayText: String {
+        switch self {
+        case .off:
+            "Sin ayuda"
+        case .legalMoves:
+            "Movimientos legales"
+        case .simulatedQuality:
+            "Calidad simulada"
+        }
+    }
+
+    var detailText: String {
+        switch self {
+        case .off:
+            "No ilumina destinos al levantar una pieza."
+        case .legalMoves:
+            "Ilumina todos los destinos legales de forma fija."
+        case .simulatedQuality:
+            "Prueba el futuro sistema de calidad: fijo, parpadeo lento y parpadeo rápido."
+        }
+    }
+}
+
+struct AssistanceSettings: Equatable, Codable, Sendable {
+    var white: AssistanceMode
+    var black: AssistanceMode
+
+    init(
+        white: AssistanceMode = .simulatedQuality,
+        black: AssistanceMode = .off
+    ) {
+        self.white = white
+        self.black = black
+    }
+
+    func mode(for color: Piece.Color) -> AssistanceMode {
+        color == .white ? white : black
+    }
+}
+
+enum LEDPattern: String, CaseIterable, Codable, Sendable {
+    case steady
+    case slowBlink
+    case fastBlink
+
+    var displayText: String {
+        switch self {
+        case .steady: "fijo"
+        case .slowBlink: "lento"
+        case .fastBlink: "rápido"
+        }
+    }
+
+    var simulatedQualityText: String {
+        switch self {
+        case .steady: "mejor"
+        case .slowBlink: "jugable"
+        case .fastBlink: "evitar"
+        }
+    }
+
+    func isLit(at tick: Int) -> Bool {
+        switch self {
+        case .steady:
+            true
+        case .slowBlink:
+            (tick / 3).isMultiple(of: 2)
+        case .fastBlink:
+            tick.isMultiple(of: 2)
+        }
+    }
+}
+
+struct LEDHint: Equatable, Sendable {
+    let square: Square
+    let pattern: LEDPattern
+}
+
+enum AssistanceHintPlanner {
+    static func hints(
+        for legalTargets: [Square],
+        mode: AssistanceMode
+    ) -> [LEDHint] {
+        let sortedTargets = legalTargets.sorted { $0.notation < $1.notation }
+
+        switch mode {
+        case .off:
+            return []
+
+        case .legalMoves:
+            return sortedTargets.map { LEDHint(square: $0, pattern: .steady) }
+
+        case .simulatedQuality:
+            guard !sortedTargets.isEmpty else { return [] }
+            guard sortedTargets.count > 1 else {
+                return [LEDHint(square: sortedTargets[0], pattern: .steady)]
+            }
+
+            return sortedTargets.enumerated().map { index, square in
+                let pattern: LEDPattern
+
+                if index == 0 {
+                    pattern = .steady
+                } else if index == sortedTargets.count - 1 {
+                    pattern = .fastBlink
+                } else {
+                    pattern = .slowBlink
+                }
+
+                return LEDHint(square: square, pattern: pattern)
+            }
+        }
+    }
+}
+
+enum LEDHintFrameComposer {
+    static func activeSquares(for hints: [LEDHint], tick: Int) -> [Square] {
+        hints.compactMap { hint in
+            hint.pattern.isLit(at: tick) ? hint.square : nil
+        }
+    }
+}
+
 extension Piece.Kind {
     var promotionSymbol: String? {
         switch self {
