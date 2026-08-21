@@ -252,7 +252,8 @@ final class OTBGameSessionTests: XCTestCase {
         let startFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         let afterE4FEN = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
 
-        XCTAssertEqual(await engine.version(), "Stockfish 18")
+        let version = await engine.version()
+        XCTAssertEqual(version, "Stockfish 18")
 
         let first = try await engine.analyze(fen: startFEN)
         XCTAssertEqual(first.version, "Stockfish 18")
