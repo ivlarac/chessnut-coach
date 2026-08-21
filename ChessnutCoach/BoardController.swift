@@ -34,7 +34,14 @@ final class BoardController: ObservableObject {
     private var fenTask: Task<Void, Never>?
     private var fenDebounceTask: Task<Void, Never>?
     private var ledTask: Task<Void, Never>?
+    private var coachingTask: Task<Void, Never>?
+    private var prewarmTask: Task<Void, Never>?
     private var gameSession = OTBGameSession()
+    private let stockfishCoach = StockfishMoveCoach()
+
+    private var currentStockfishHints: [StockfishMoveHint] = []
+    private var currentStockfishHintFEN: String?
+    private var currentStockfishHintSource: Square?
 
     // Chessnut can emit several physical snapshots while a hand is moving a
     // piece. Never let LED writes block consumption of that realtime stream:
@@ -43,6 +50,10 @@ final class BoardController: ObservableObject {
     private var lastProcessedPlacement = ""
     private let fenSettleDelay: Duration = .milliseconds(100)
     private let ledTickDelay: Duration = .milliseconds(250)
+
+    private var logicalFEN: String {
+        gameSession.board.position.fen
+    }
 
     func connect() {
         guard connectionTask == nil, !isConnected else { return }
@@ -87,6 +98,11 @@ final class BoardController: ObservableObject {
         fenDebounceTask = nil
         ledTask?.cancel()
         ledTask = nil
+        coachingTask?.cancel()
+        coachingTask = nil
+        prewarmTask?.cancel()
+        prewarmTask = nil
+        clearStockfishHints()
         activeHintSummary = ""
 
         guard let client else {
@@ -112,6 +128,11 @@ final class BoardController: ObservableObject {
     }
 
     func newGame() {
+        coachingTask?.cancel()
+        coachingTask = nil
+        prewarmTask?.cancel()
+        prewarmTask = nil
+        clearStockfishHints()
         gameSession.reset()
         lastProcessedPlacement = ""
         activeHintSummary = ""
@@ -125,11 +146,13 @@ final class BoardController: ObservableObject {
     func setWhiteAssistanceMode(_ mode: AssistanceMode) {
         assistanceSettings.white = mode
         refreshCurrentAssistanceIfNeeded()
+        scheduleStockfishPrewarmIfNeeded()
     }
 
     func setBlackAssistanceMode(_ mode: AssistanceMode) {
         assistanceSettings.black = mode
         refreshCurrentAssistanceIfNeeded()
+        scheduleStockfishPrewarmIfNeeded()
     }
 
     func resignCurrentSide() {
@@ -293,6 +316,8 @@ final class BoardController: ObservableObject {
 
         lastProcessedPlacement = placement
 
+        coachingTask?.cancel()
+        coachingTask = nil
         ledTask?.cancel()
         ledTask = nil
         activeHintSummary = ""
@@ -303,6 +328,7 @@ final class BoardController: ObservableObject {
         do {
             switch event {
             case .synchronized:
+                clearStockfishHints()
                 if gameSession.isFinished {
                     gameStatus = gameSession.result.displayText
                 } else if gameSession.isPromotionPending {
@@ -313,14 +339,15 @@ final class BoardController: ObservableObject {
                         : "Movimiento registrado. Turno de \(sideToMoveLabel.lowercased())."
                 }
                 try await client.setLEDs(.allOff)
+                scheduleStockfishPrewarmIfNeeded()
 
             case let .pieceLifted(source, legalTargets):
+                clearStockfishHints()
                 if legalTargets.isEmpty {
                     gameStatus = "\(source.notation) no tiene movimientos legales."
                     try await client.setLEDs(.allOff)
                 } else {
                     let mode = assistanceSettings.mode(for: gameSession.sideToMove)
-                    let hints = AssistanceHintPlanner.hints(for: legalTargets, mode: mode)
 
                     switch mode {
                     case .off:
@@ -328,26 +355,35 @@ final class BoardController: ObservableObject {
                         try await client.setLEDs(.allOff)
 
                     case .legalMoves:
+                        let hints = AssistanceHintPlanner.hints(for: legalTargets, mode: mode)
                         gameStatus = "Pieza levantada en \(source.notation). LEDs fijos = destinos legales."
-                        activeHintSummary = hintSummary(hints, includeQuality: false)
+                        activeHintSummary = hintSummary(hints)
                         startLEDHints(hints, client: client)
 
-                    case .simulatedQuality:
-                        gameStatus = "Pieza levantada en \(source.notation). Calidad simulada: fijo = mejor, lento = jugable, rápido = evitar."
-                        activeHintSummary = hintSummary(hints, includeQuality: true)
-                        startLEDHints(hints, client: client)
+                    case .stockfishQuality:
+                        gameStatus = "Pieza levantada en \(source.notation). Stockfish 18 está valorando sus destinos…"
+                        activeHintSummary = "Stockfish 18 analizando \(source.notation)…"
+                        try await client.setLEDs(.allOff)
+                        startStockfishCoaching(
+                            source: source,
+                            legalTargets: legalTargets,
+                            client: client
+                        )
                     }
                 }
 
             case let .moveCompleted(move):
+                clearStockfishHints()
                 if gameSession.isFinished {
                     gameStatus = "Registrado \(move.san). \(gameSession.result.displayText)"
                 } else {
                     gameStatus = "Registrado \(move.san) (\(move.coordinateNotation)). Turno de \(sideToMoveLabel.lowercased())."
                 }
                 try await client.setLEDs(.allOff)
+                scheduleStockfishPrewarmIfNeeded()
 
             case let .promotionRequired(square, legalKinds):
+                clearStockfishHints()
                 let pieces = legalKinds.compactMap(\.promotionSymbol).joined(separator: ", ")
                 gameStatus = "Promoción en \(square.notation): sustituye el peón por \(pieces)."
                 try await client.setLEDs(ledBoard(for: [square]))
@@ -356,20 +392,33 @@ final class BoardController: ObservableObject {
                 gameStatus = message
                 if !gameSession.legalTargets.isEmpty {
                     let mode = assistanceSettings.mode(for: gameSession.sideToMove)
-                    let hints = AssistanceHintPlanner.hints(for: gameSession.legalTargets, mode: mode)
 
-                    if hints.isEmpty {
+                    switch mode {
+                    case .off:
                         try await client.setLEDs(.allOff)
-                    } else {
-                        activeHintSummary = hintSummary(
-                            hints,
-                            includeQuality: mode == .simulatedQuality
+
+                    case .legalMoves:
+                        let hints = AssistanceHintPlanner.hints(
+                            for: gameSession.legalTargets,
+                            mode: mode
                         )
+                        activeHintSummary = hintSummary(hints)
                         startLEDHints(hints, client: client)
+
+                    case .stockfishQuality:
+                        if currentStockfishHintFEN == logicalFEN,
+                           currentStockfishHintSource == gameSession.liftedSquare,
+                           !currentStockfishHints.isEmpty {
+                            activeHintSummary = stockfishHintSummary(currentStockfishHints)
+                            startLEDHints(currentStockfishHints.map(\.ledHint), client: client)
+                        } else {
+                            try await client.setLEDs(.allOff)
+                        }
                     }
                 }
 
             case let .invalid(message):
+                clearStockfishHints()
                 gameStatus = message
                 try await client.setLEDs(.allOff)
             }
@@ -380,27 +429,100 @@ final class BoardController: ObservableObject {
 
     private func refreshCurrentAssistanceIfNeeded() {
         guard let client,
-              gameSession.liftedSquare != nil,
+              let source = gameSession.liftedSquare,
               !gameSession.legalTargets.isEmpty,
               !gameSession.isFinished
         else { return }
 
+        coachingTask?.cancel()
+        coachingTask = nil
         ledTask?.cancel()
         ledTask = nil
+        clearStockfishHints()
         activeHintSummary = ""
 
         let mode = assistanceSettings.mode(for: gameSession.sideToMove)
-        let hints = AssistanceHintPlanner.hints(for: gameSession.legalTargets, mode: mode)
-
-        if hints.isEmpty {
+        switch mode {
+        case .off:
             Task {
                 try? await client.setLEDs(.allOff)
             }
-            return
-        }
 
-        activeHintSummary = hintSummary(hints, includeQuality: mode == .simulatedQuality)
-        startLEDHints(hints, client: client)
+        case .legalMoves:
+            let hints = AssistanceHintPlanner.hints(for: gameSession.legalTargets, mode: mode)
+            activeHintSummary = hintSummary(hints)
+            startLEDHints(hints, client: client)
+
+        case .stockfishQuality:
+            activeHintSummary = "Stockfish 18 analizando \(source.notation)…"
+            startStockfishCoaching(
+                source: source,
+                legalTargets: gameSession.legalTargets,
+                client: client
+            )
+        }
+    }
+
+    private func scheduleStockfishPrewarmIfNeeded() {
+        prewarmTask?.cancel()
+        prewarmTask = nil
+
+        guard !gameSession.isFinished,
+              gameSession.liftedSquare == nil,
+              assistanceSettings.mode(for: gameSession.sideToMove) == .stockfishQuality
+        else { return }
+
+        let fen = logicalFEN
+        let coach = stockfishCoach
+        prewarmTask = Task {
+            await coach.prepare(fen: fen)
+        }
+    }
+
+    private func startStockfishCoaching(
+        source: Square,
+        legalTargets: [Square],
+        client: EasyLinkClient
+    ) {
+        coachingTask?.cancel()
+        clearStockfishHints()
+
+        let fen = logicalFEN
+        let coach = stockfishCoach
+
+        coachingTask = Task { [weak self] in
+            do {
+                let result = try await coach.evaluate(
+                    fen: fen,
+                    source: source,
+                    legalTargets: legalTargets
+                )
+                try Task.checkCancellation()
+                guard let self else { return }
+                guard self.logicalFEN == fen,
+                      self.gameSession.liftedSquare == source,
+                      self.assistanceSettings.mode(for: self.gameSession.sideToMove) == .stockfishQuality,
+                      self.isConnected
+                else { return }
+
+                self.currentStockfishHints = result.hints
+                self.currentStockfishHintFEN = fen
+                self.currentStockfishHintSource = source
+                self.activeHintSummary = self.stockfishHintSummary(result.hints)
+                self.gameStatus = "Stockfish 18: fijo = bueno (≤50 cp), lento = aceptable (≤200 cp), rápido = blunder."
+                self.startLEDHints(result.hints.map(\.ledHint), client: client)
+            } catch is CancellationError {
+                // The piece was returned/moved or a newer assistance request won.
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                guard self.logicalFEN == fen, self.gameSession.liftedSquare == source else { return }
+
+                self.clearStockfishHints()
+                self.activeHintSummary = ""
+                self.gameStatus = "No se pudo analizar \(source.notation) con Stockfish 18: \(error.localizedDescription)"
+                try? await client.setLEDs(.allOff)
+            }
+        }
     }
 
     private func startLEDHints(_ hints: [LEDHint], client: EasyLinkClient) {
@@ -447,14 +569,20 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func hintSummary(_ hints: [LEDHint], includeQuality: Bool) -> String {
-        hints.map { hint in
-            if includeQuality {
-                return "\(hint.square.notation) \(hint.pattern.displayText)/\(hint.pattern.simulatedQualityText)"
-            }
-            return "\(hint.square.notation) \(hint.pattern.displayText)"
-        }
-        .joined(separator: " · ")
+    private func hintSummary(_ hints: [LEDHint]) -> String {
+        hints
+            .map { "\($0.square.notation) \($0.pattern.displayText)" }
+            .joined(separator: " · ")
+    }
+
+    private func stockfishHintSummary(_ hints: [StockfishMoveHint]) -> String {
+        hints.map(\.detailText).joined(separator: " · ")
+    }
+
+    private func clearStockfishHints() {
+        currentStockfishHints = []
+        currentStockfishHintFEN = nil
+        currentStockfishHintSource = nil
     }
 
     private func ledBoard(for squares: [Square]) -> LEDBoard {
@@ -501,6 +629,11 @@ final class BoardController: ObservableObject {
     }
 
     private func turnOffAutomaticLEDs() {
+        coachingTask?.cancel()
+        coachingTask = nil
+        prewarmTask?.cancel()
+        prewarmTask = nil
+        clearStockfishHints()
         activeHintSummary = ""
         guard let client else { return }
         ledTask?.cancel()
@@ -526,6 +659,7 @@ final class BoardController: ObservableObject {
         latestPhysicalPlacement = ""
         lastProcessedPlacement = ""
         isBoardSynchronized = false
+        clearStockfishHints()
         activeHintSummary = ""
         gameStatus = "Conecta el tablero para continuar la partida."
     }
