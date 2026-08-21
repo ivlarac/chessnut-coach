@@ -13,6 +13,7 @@
 		A10000000000000000000004 /* EasyLinkSwiftSDK in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000001 /* EasyLinkSwiftSDK */; };
 		A10000000000000000000005 /* OTBGameSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000005 /* OTBGameSession.swift */; };
 		A10000000000000000000006 /* ChessKit in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000003 /* ChessKit */; };
+		A10000000000000000000007 /* GameModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000006 /* GameModels.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +22,7 @@
 		B10000000000000000000003 /* BoardController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardController.swift; sourceTree = "<group>"; };
 		B10000000000000000000004 /* ChessnutCoach.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChessnutCoach.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000005 /* OTBGameSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OTBGameSession.swift; sourceTree = "<group>"; };
+		B10000000000000000000006 /* GameModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameModels.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,6 +52,7 @@
 				B10000000000000000000001 /* ChessnutCoachApp.swift */,
 				B10000000000000000000002 /* ContentView.swift */,
 				B10000000000000000000003 /* BoardController.swift */,
+				B10000000000000000000006 /* GameModels.swift */,
 				B10000000000000000000005 /* OTBGameSession.swift */,
 			);
 			path = ChessnutCoach;
@@ -142,6 +145,7 @@
 				A10000000000000000000001 /* ChessnutCoachApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* BoardController.swift in Sources */,
+				A10000000000000000000007 /* GameModels.swift in Sources */,
 				A10000000000000000000005 /* OTBGameSession.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -186,14 +190,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chessnut Coach necesita Bluetooth para conectarse al tablero Chessnut.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.0.2;
+				MARKETING_VERSION = 0.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ivlarac.chessnutcoach;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -209,14 +213,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chessnut Coach necesita Bluetooth para conectarse al tablero Chessnut.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.0.2;
+				MARKETING_VERSION = 0.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ivlarac.chessnutcoach;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
