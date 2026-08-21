@@ -29,14 +29,36 @@ jobs:
         run: xcodebuild -resolvePackageDependencies -project ChessnutCoach.xcodeproj -scheme ChessnutCoach
 
       - name: Build for iOS Simulator
+        id: iosbuild
+        continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
           xcodebuild \
             -project ChessnutCoach.xcodeproj \
             -scheme ChessnutCoach \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee /tmp/xcodebuild.log
+
+      - name: Show concise build errors
+        if: steps.iosbuild.outcome == 'failure'
+        run: |
+          echo '--- relevant xcodebuild errors ---'
+          grep -E '(^| )error:|fatal error:|PhaseScriptExecution|Stockfish|BUILD FAILED|Undefined symbols|ld:' /tmp/xcodebuild.log | tail -250 || true
+
+      - name: Upload build log on failure
+        if: steps.iosbuild.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stockfish-build-log
+          path: /tmp/xcodebuild.log
+          retention-days: 2
+
+      - name: Fail after build diagnostics
+        if: steps.iosbuild.outcome == 'failure'
+        run: exit 1
 
       - name: Run game-core unit tests
         run: swift test
