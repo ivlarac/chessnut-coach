@@ -53,7 +53,6 @@ struct OTBGameSession: Sendable {
         }
 
         if let completed = matchingLegalMove(for: physicalPlacement) {
-            let positionBeforeMove = board.position
             guard let move = board.move(pieceAt: completed.from, to: completed.to) else {
                 isSynchronized = false
                 return .invalid("No se pudo aplicar el movimiento detectado.")
@@ -62,13 +61,8 @@ struct OTBGameSession: Sendable {
             let detected = OTBDetectedMove(
                 from: completed.from,
                 to: completed.to,
-                san: Move(result: move.result, piece: move.piece, start: move.start, end: move.end, checkState: move.checkState).san
+                san: move.san
             )
-
-            // SAN uses the pre-move position internally via the Move metadata. Keep
-            // this read so the intended sequencing remains explicit when promotion
-            // support is added.
-            _ = positionBeforeMove
 
             liftedSquare = nil
             legalTargets = []
