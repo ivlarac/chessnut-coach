@@ -9,6 +9,7 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 connectionSection
+                gameSection
                 positionSection
                 ledSection
                 notesSection
@@ -41,27 +42,68 @@ struct ContentView: View {
         }
     }
 
-    private var positionSection: some View {
-        Section("Posición física") {
-            if board.boardPlacement.isEmpty {
-                Text("Sin datos todavía")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(board.boardPlacement)
-                    .font(.system(.footnote, design: .monospaced))
-                    .textSelection(.enabled)
+    private var gameSection: some View {
+        Section("Partida OTB") {
+            LabeledContent("Turno", value: board.sideToMoveLabel)
+            LabeledContent(
+                "Tablero",
+                value: board.isBoardSynchronized ? "Sincronizado" : "En movimiento"
+            )
+
+            Text(board.gameStatus)
+
+            if let liftedSquare = board.liftedSquare {
+                LabeledContent("Pieza levantada", value: liftedSquare)
             }
 
-            Text("Al levantar o colocar una pieza, esta cadena debe cambiar inmediatamente.")
+            if !board.legalTargets.isEmpty {
+                LabeledContent("Destinos legales", value: board.legalTargets.joined(separator: ", "))
+            }
+
+            if let lastMove = board.lastMove {
+                LabeledContent("Último movimiento", value: lastMove)
+            }
+
+            Button("Nueva partida desde posición inicial") {
+                board.newGame()
+            }
+            .disabled(!board.isConnected)
+
+            Text("Empieza con las piezas en su posición inicial. Al levantar una pieza del jugador que tiene el turno, el Chessnut Air iluminará únicamente sus destinos legales. Al colocarla en un destino legal, la app registrará el movimiento y cambiará el turno.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
     }
 
+    private var positionSection: some View {
+        Section("Diagnóstico de posición") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Física")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(board.boardPlacement.isEmpty ? "Sin datos todavía" : board.boardPlacement)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Lógica")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(board.logicalPlacement)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
     private var ledSection: some View {
-        Section("Prueba de LEDs") {
+        Section("Diagnóstico de LEDs") {
             Stepper("Rank index: \(rankIndex)", value: $rankIndex, in: 0...7)
             Stepper("File index: \(fileIndex)", value: $fileIndex, in: 0...7)
+            LabeledContent("Casilla", value: board.squareNotation(rankIndex: rankIndex, fileIndex: fileIndex))
 
             Button("Encender LED") {
                 board.lightLED(rankIndex: rankIndex, fileIndex: fileIndex)
@@ -77,14 +119,18 @@ struct ContentView: View {
                 board.ledsOff()
             }
             .disabled(!board.isConnected)
+
+            Text("Mapeo confirmado en Chessnut Air: (0,0)=a8, (0,7)=h8, (7,0)=a1 y (7,7)=h1.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
     private var notesSection: some View {
-        Section("Objetivo de esta PoC") {
-            Text("1. Conectar por Bluetooth.\n2. Recibir la posición del tablero.\n3. Encender una casilla.\n4. Hacerla parpadear.")
+        Section("Estado del proyecto") {
+            Text("Esta versión ya incluye reglas de ajedrez y seguimiento básico de una partida OTB. Todavía no incluye Stockfish ni clasificación de jugadas por calidad.")
 
-            Text("Todavía no incluye reglas de ajedrez ni Stockfish. Es intencionado: primero validamos el hardware real.")
+            Text("Capturas, enroque y en passant se validan comparando el estado físico final con todas las transiciones legales posibles. La promoción se completará en una fase posterior.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
