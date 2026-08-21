@@ -21,8 +21,16 @@ final class BoardController: ObservableObject {
     private var client: EasyLinkClient?
     private var connectionTask: Task<Void, Never>?
     private var fenTask: Task<Void, Never>?
+    private var fenDebounceTask: Task<Void, Never>?
     private var ledTask: Task<Void, Never>?
     private var gameSession = OTBGameSession()
+
+    // Chessnut can emit several physical snapshots while a hand is moving a
+    // piece. Never let LED writes block consumption of that realtime stream:
+    // keep only the newest snapshot and process it after a very short settle.
+    private var latestPhysicalPlacement = ""
+    private var lastProcessedPlacement = ""
+    private let fenSettleDelay: Duration = .milliseconds(100)
 
     func connect() {
         guard connectionTask == nil, !isConnected else { return }
@@ -47,8 +55,10 @@ final class BoardController: ObservableObject {
                 self.isConnected = true
                 self.status = "Conectado"
 
+                // Do not query the battery automatically here. The SDK
+                // serializes commands and a slow/unsupported battery response
+                // could otherwise delay the first LED guidance by seconds.
                 self.startFENStream(client: client)
-                await self.refreshBattery(using: client)
             } catch {
                 await client.disconnect()
                 self.client = nil
@@ -65,6 +75,8 @@ final class BoardController: ObservableObject {
         connectionTask = nil
         fenTask?.cancel()
         fenTask = nil
+        fenDebounceTask?.cancel()
+        fenDebounceTask = nil
         ledTask?.cancel()
         ledTask = nil
 
@@ -92,15 +104,12 @@ final class BoardController: ObservableObject {
 
     func newGame() {
         gameSession.reset()
+        lastProcessedPlacement = ""
         publishGameState()
         gameStatus = "Nueva partida. Coloca todas las piezas en la posición inicial."
 
         guard let client, !boardPlacement.isEmpty else { return }
-        let currentPlacement = boardPlacement
-
-        Task { [weak self] in
-            await self?.handlePhysicalPlacement(currentPlacement, client: client)
-        }
+        schedulePhysicalPlacement(boardPlacement, client: client, force: true)
     }
 
     func squareNotation(rankIndex: Int, fileIndex: Int) -> String {
@@ -123,6 +132,8 @@ final class BoardController: ObservableObject {
                 try await client.setLEDs(leds)
                 let notation = self?.squareNotation(rankIndex: rankIndex, fileIndex: fileIndex) ?? "?"
                 self?.status = "LED activo en \(notation)"
+            } catch is CancellationError {
+                // Another board event took priority over the manual test.
             } catch {
                 self?.status = "Error LEDs: \(error.localizedDescription)"
             }
@@ -176,13 +187,53 @@ final class BoardController: ObservableObject {
         fenTask = Task { [weak self] in
             for await placement in client.fenUpdates {
                 guard !Task.isCancelled else { return }
-                await self?.handlePhysicalPlacement(placement, client: client)
+                self?.receivePhysicalPlacement(placement, client: client)
             }
         }
     }
 
-    private func handlePhysicalPlacement(_ placement: String, client: EasyLinkClient) async {
+    private func receivePhysicalPlacement(_ placement: String, client: EasyLinkClient) {
+        // Publish raw hardware state immediately for diagnostics, but do not do
+        // any awaited BLE work here. This lets the stream keep draining and
+        // prevents stale FEN snapshots from building up behind LED commands.
         boardPlacement = placement
+        latestPhysicalPlacement = placement
+        schedulePhysicalPlacement(placement, client: client)
+    }
+
+    private func schedulePhysicalPlacement(
+        _ placement: String,
+        client: EasyLinkClient,
+        force: Bool = false
+    ) {
+        fenDebounceTask?.cancel()
+
+        fenDebounceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: self?.fenSettleDelay ?? .milliseconds(100))
+                try Task.checkCancellation()
+                guard let self else { return }
+
+                // If another FEN arrived during the settle window, this task is
+                // obsolete. Only the newest stable physical position matters.
+                guard force || placement == self.latestPhysicalPlacement else { return }
+                guard force || placement != self.lastProcessedPlacement else { return }
+
+                await self.processStablePhysicalPlacement(placement, client: client)
+            } catch is CancellationError {
+                // Expected whenever a newer physical snapshot supersedes this one.
+            } catch {
+                self?.gameStatus = "Error procesando el tablero: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func processStablePhysicalPlacement(_ placement: String, client: EasyLinkClient) async {
+        guard placement == latestPhysicalPlacement else { return }
+
+        lastProcessedPlacement = placement
+
+        // Automatic guidance takes priority over any manual LED diagnostic.
         ledTask?.cancel()
         ledTask = nil
 
@@ -248,11 +299,9 @@ final class BoardController: ObservableObject {
 
     private func refreshBattery(using client: EasyLinkClient) async {
         do {
-            let battery = try await client.batteryStatus(timeout: .seconds(5))
+            let battery = try await client.batteryStatus(timeout: .seconds(3))
             batteryPercentage = battery.percentage
         } catch {
-            // Battery support is useful but should not make a valid BLE/FEN
-            // connection appear broken if a firmware does not answer.
             batteryPercentage = nil
         }
     }
@@ -262,6 +311,8 @@ final class BoardController: ObservableObject {
         status = "Desconectado"
         boardPlacement = ""
         batteryPercentage = nil
+        latestPhysicalPlacement = ""
+        lastProcessedPlacement = ""
         isBoardSynchronized = false
         gameStatus = "Conecta el tablero para continuar la partida."
     }
