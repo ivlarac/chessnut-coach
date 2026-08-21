@@ -14,7 +14,7 @@ final class OTBGameSessionTests: XCTestCase {
         }
 
         XCTAssertEqual(source, .e2)
-        XCTAssertEqual(Set(targets), Set([.e3, .e4]))
+        XCTAssertEqual(targets.map(\.notation).sorted(), ["e3", "e4"])
         XCTAssertEqual(session.moves.count, 0)
     }
 
