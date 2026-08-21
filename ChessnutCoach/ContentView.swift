@@ -1,18 +1,17 @@
 import SwiftUI
 
 struct ContentView: View {
-    private enum FinishAction: String, Identifiable {
+    private enum FinishAction: String {
         case resign
         case draw
         case abort
-
-        var id: String { rawValue }
     }
 
     @StateObject private var board = BoardController()
     @State private var rankIndex = 0
     @State private var fileIndex = 0
     @State private var finishAction: FinishAction?
+    @State private var isFinishDialogPresented = false
 
     var body: some View {
         NavigationStack {
@@ -27,22 +26,27 @@ struct ContentView: View {
             .navigationTitle("Chessnut Coach")
             .confirmationDialog(
                 finishDialogTitle,
-                item: $finishAction,
+                isPresented: $isFinishDialogPresented,
                 titleVisibility: .visible
-            ) { action in
-                switch action {
+            ) {
+                switch finishAction {
                 case .resign:
                     Button("Confirmar abandono", role: .destructive) {
                         board.resignCurrentSide()
+                        finishAction = nil
                     }
                 case .draw:
                     Button("Confirmar tablas") {
                         board.agreeDraw()
+                        finishAction = nil
                     }
                 case .abort:
                     Button("Cancelar partida", role: .destructive) {
                         board.abortGame()
+                        finishAction = nil
                     }
+                case nil:
+                    EmptyView()
                 }
             }
         }
@@ -108,15 +112,15 @@ struct ContentView: View {
 
             if !board.isGameFinished && board.moveCount > 0 {
                 Button("Rendirse (\(board.sideToMoveLabel))", role: .destructive) {
-                    finishAction = .resign
+                    presentFinishDialog(.resign)
                 }
 
                 Button("Tablas por acuerdo") {
-                    finishAction = .draw
+                    presentFinishDialog(.draw)
                 }
 
                 Button("Cancelar partida sin resultado", role: .destructive) {
-                    finishAction = .abort
+                    presentFinishDialog(.abort)
                 }
             }
         }
@@ -210,6 +214,11 @@ struct ContentView: View {
         case nil:
             "Finalizar partida"
         }
+    }
+
+    private func presentFinishDialog(_ action: FinishAction) {
+        finishAction = action
+        isFinishDialogPresented = true
     }
 }
 
