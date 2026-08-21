@@ -9,13 +9,21 @@ on:
 jobs:
   build-and-test:
     runs-on: macos-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Cache Stockfish 18 NNUE networks
+        uses: actions/cache@v4
+        with:
+          path: StockfishNetworks
+          key: stockfish18-nnue-c288c895ea92-37f18f62d772
 
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project ChessnutCoach.xcodeproj -scheme ChessnutCoach
