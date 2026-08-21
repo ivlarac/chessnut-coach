@@ -71,7 +71,7 @@ enum PGNExporter {
             header("White", value: normalizedPlayer(record.whitePlayer, fallback: "White")),
             header("Black", value: normalizedPlayer(record.blackPlayer, fallback: "Black")),
             header("Result", value: record.result.pgnValue),
-        ] + setupHeaders(for: record) + [
+        ] + setupHeaders(for: record) + soloHeaders(for: record) + [
             header("PlyCount", value: String(record.moves.count)),
             header("Termination", value: termination(for: record)),
         ]
@@ -105,6 +105,16 @@ enum PGNExporter {
         return [
             header("SetUp", value: "1"),
             header("FEN", value: record.initialFEN),
+        ]
+    }
+
+    private static func soloHeaders(for record: GameRecord) -> [String] {
+        guard record.mode == .solo else { return [] }
+        return [
+            header("Mode", value: "Solo"),
+            header("HumanSide", value: record.humanSide?.displayText ?? "Unknown"),
+            header("Engine", value: record.engineName ?? "Stockfish 18"),
+            header("EngineStrength", value: record.engineStrength?.displayText ?? "Maximum"),
         ]
     }
 

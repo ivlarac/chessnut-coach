@@ -58,7 +58,9 @@ final class GameLibrary: ObservableObject {
     }
 
     var resumableGame: GameRecord? {
-        games.first { $0.status == .playing && !$0.moves.isEmpty }
+        games.first {
+            $0.status == .playing && (!$0.moves.isEmpty || $0.mode == .solo)
+        }
     }
 
     func upsert(_ game: GameRecord) {

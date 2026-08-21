@@ -11,6 +11,44 @@ struct OTBDetectedMove: Equatable, Sendable {
     }
 }
 
+struct OTBExpectedMove: Equatable, Sendable {
+    let from: Square
+    let to: Square
+    let promotion: Piece.Kind?
+
+    init?(uci: String) {
+        let value = uci.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard value.count == 4 || value.count == 5 else { return nil }
+        let characters = Array(value)
+        guard ("a"..."h").contains(String(characters[0])),
+              ("1"..."8").contains(String(characters[1])),
+              ("a"..."h").contains(String(characters[2])),
+              ("1"..."8").contains(String(characters[3]))
+        else { return nil }
+        let from = Square(String(characters[0...1]))
+        let to = Square(String(characters[2...3]))
+
+        let promotion: Piece.Kind?
+        if characters.count == 5 {
+            switch characters[4] {
+            case "q": promotion = .queen
+            case "r": promotion = .rook
+            case "b": promotion = .bishop
+            case "n": promotion = .knight
+            default: return nil
+            }
+        } else {
+            promotion = nil
+        }
+
+        self.from = from
+        self.to = to
+        self.promotion = promotion
+    }
+
+    var displayText: String { "\(from.notation)→\(to.notation)" }
+}
+
 enum OTBGameEvent: Equatable, Sendable {
     case synchronized
     case pieceLifted(source: Square, legalTargets: [Square])
@@ -31,6 +69,7 @@ struct OTBGameSession: Sendable {
         let move: Move
         let fenBefore: String
         let playedAt: Date
+        let requiredKind: Piece.Kind?
     }
 
     private struct LegalTransition: Sendable {
@@ -53,14 +92,22 @@ struct OTBGameSession: Sendable {
         position: Position = .standard,
         startedAt: Date = Date(),
         whitePlayer: String = "Blancas",
-        blackPlayer: String = "Negras"
+        blackPlayer: String = "Negras",
+        mode: GameMode = .twoPlayer,
+        humanSide: PlayerSide? = nil,
+        engineStrength: StockfishStrength? = nil,
+        engineName: String? = nil
     ) {
         board = Board(position: position)
         gameRecord = GameRecord(
             startedAt: startedAt,
             initialFEN: position.fen,
             whitePlayer: whitePlayer,
-            blackPlayer: blackPlayer
+            blackPlayer: blackPlayer,
+            mode: mode,
+            humanSide: humanSide,
+            engineStrength: engineStrength,
+            engineName: engineName
         )
         applyTerminalBoardStateIfNeeded(at: startedAt)
     }
@@ -127,12 +174,20 @@ struct OTBGameSession: Sendable {
     mutating func reset(
         startedAt: Date = Date(),
         whitePlayer: String = "Blancas",
-        blackPlayer: String = "Negras"
+        blackPlayer: String = "Negras",
+        mode: GameMode = .twoPlayer,
+        humanSide: PlayerSide? = nil,
+        engineStrength: StockfishStrength? = nil,
+        engineName: String? = nil
     ) {
         self = OTBGameSession(
             startedAt: startedAt,
             whitePlayer: whitePlayer,
-            blackPlayer: blackPlayer
+            blackPlayer: blackPlayer,
+            mode: mode,
+            humanSide: humanSide,
+            engineStrength: engineStrength,
+            engineName: engineName
         )
     }
 
@@ -170,7 +225,11 @@ struct OTBGameSession: Sendable {
         pendingPromotion = nil
     }
 
-    mutating func process(physicalPlacement: String, at date: Date = Date()) -> OTBGameEvent {
+    mutating func process(
+        physicalPlacement: String,
+        at date: Date = Date(),
+        requiredMove: OTBExpectedMove? = nil
+    ) -> OTBGameEvent {
         let physicalPlacement = Self.placementField(from: physicalPlacement)
 
         if gameRecord.status != .playing {
@@ -191,8 +250,13 @@ struct OTBGameSession: Sendable {
             return .synchronized
         }
 
-        if let transition = matchingLegalTransition(for: physicalPlacement) {
-            return apply(transition: transition, physicalPlacement: physicalPlacement, at: date)
+        if let transition = matchingLegalTransition(for: physicalPlacement, requiredMove: requiredMove) {
+            return apply(
+                transition: transition,
+                physicalPlacement: physicalPlacement,
+                at: date,
+                requiredMove: requiredMove
+            )
         }
 
         let logicalPieces = Self.parsePlacement(logicalPlacement)
@@ -205,7 +269,14 @@ struct OTBGameSession: Sendable {
 
         if ownMissingPieces.count == 1 {
             let source = ownMissingPieces[0].square
-            let targets = board.legalMoves(forPieceAt: source)
+            if let requiredMove, source != requiredMove.from {
+                liftedSquare = nil
+                legalTargets = []
+                isSynchronized = false
+                return .invalid("Es el turno de Stockfish. Ejecuta \(requiredMove.displayText) en el tablero.")
+            }
+            let allTargets = board.legalMoves(forPieceAt: source)
+            let targets = requiredMove.map { allTargets.contains($0.to) ? [$0.to] : [] } ?? allTargets
             let unexpectedPieces = physicalPieces.filter { square, piece in
                 logicalPieces[square] != piece
             }
@@ -250,7 +321,8 @@ struct OTBGameSession: Sendable {
     private mutating func apply(
         transition: LegalTransition,
         physicalPlacement: String,
-        at date: Date
+        at date: Date,
+        requiredMove: OTBExpectedMove?
     ) -> OTBGameEvent {
         let fenBefore = board.position.fen
 
@@ -265,7 +337,12 @@ struct OTBGameSession: Sendable {
                 return complete(move: finalMove, fenBefore: fenBefore, playedAt: date)
             }
 
-            pendingPromotion = PendingPromotion(move: move, fenBefore: fenBefore, playedAt: date)
+            pendingPromotion = PendingPromotion(
+                move: move,
+                fenBefore: fenBefore,
+                playedAt: date,
+                requiredKind: requiredMove?.promotion
+            )
             liftedSquare = nil
             legalTargets = []
             isSynchronized = physicalPlacement == logicalPlacement
@@ -288,7 +365,8 @@ struct OTBGameSession: Sendable {
             return .promotionRequired(square: pendingPromotion.move.end, legalKinds: Self.promotionKinds)
         }
 
-        for kind in Self.promotionKinds {
+        let allowedKinds = pendingPromotion.requiredKind.map { [$0] } ?? Self.promotionKinds
+        for kind in allowedKinds {
             var candidate = board
             let finalMove = candidate.completePromotion(of: pendingPromotion.move, to: kind)
 
@@ -326,7 +404,8 @@ struct OTBGameSession: Sendable {
             fenBefore: fenBefore,
             fenAfter: board.position.fen,
             playedAt: playedAt,
-            promotion: move.promotedPiece?.kind.promotionSymbol
+            promotion: move.promotedPiece?.kind.promotionSymbol,
+            participant: participant(forFEN: fenBefore)
         )
 
         gameRecord.moves.append(record)
@@ -338,11 +417,16 @@ struct OTBGameSession: Sendable {
         return .moveCompleted(detected)
     }
 
-    private func matchingLegalTransition(for physicalPlacement: String) -> LegalTransition? {
+    private func matchingLegalTransition(
+        for physicalPlacement: String,
+        requiredMove: OTBExpectedMove?
+    ) -> LegalTransition? {
         let movingColor = board.position.sideToMove
 
         for piece in board.position.pieces where piece.color == movingColor {
+            if let requiredMove, piece.square != requiredMove.from { continue }
             for target in board.legalMoves(forPieceAt: piece.square) {
+                if let requiredMove, target != requiredMove.to { continue }
                 var candidate = board
                 guard candidate.move(pieceAt: piece.square, to: target) != nil else { continue }
 
@@ -355,6 +439,12 @@ struct OTBGameSession: Sendable {
                         var promotedCandidate = candidate
                         _ = promotedCandidate.completePromotion(of: move, to: kind)
 
+                        if let requiredMove,
+                           let requiredPromotion = requiredMove.promotion,
+                           kind != requiredPromotion {
+                            continue
+                        }
+
                         if Self.placementField(from: promotedCandidate.position.fen) == physicalPlacement {
                             return LegalTransition(from: piece.square, to: target, promotion: kind)
                         }
@@ -364,6 +454,15 @@ struct OTBGameSession: Sendable {
         }
 
         return nil
+    }
+
+    private func participant(forFEN fen: String) -> MoveParticipant {
+        guard gameRecord.mode == .solo,
+              let humanSide = gameRecord.humanSide,
+              let position = Position(fen: fen)
+        else { return .player }
+
+        return position.sideToMove == humanSide.pieceColor ? .human : .engine
     }
 
     private mutating func applyTerminalBoardStateIfNeeded(at date: Date) {
