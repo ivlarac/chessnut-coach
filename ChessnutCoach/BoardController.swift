@@ -197,6 +197,11 @@ final class BoardController: ObservableObject {
         // any awaited BLE work here. This lets the stream keep draining and
         // prevents stale FEN snapshots from building up behind LED commands.
         boardPlacement = placement
+
+        // Repeated identical notifications must not keep resetting the settle
+        // timer forever. Only an actual physical-position change restarts it.
+        guard placement != latestPhysicalPlacement else { return }
+
         latestPhysicalPlacement = placement
         schedulePhysicalPlacement(placement, client: client)
     }
