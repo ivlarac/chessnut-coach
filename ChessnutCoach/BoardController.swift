@@ -14,12 +14,6 @@ final class BoardController: ObservableObject {
     private var fenTask: Task<Void, Never>?
     private var ledTask: Task<Void, Never>?
 
-    deinit {
-        connectionTask?.cancel()
-        fenTask?.cancel()
-        ledTask?.cancel()
-    }
-
     func connect() {
         guard connectionTask == nil, !isConnected else { return }
 
