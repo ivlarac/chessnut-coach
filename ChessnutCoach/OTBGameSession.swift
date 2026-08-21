@@ -20,6 +20,12 @@ enum OTBGameEvent: Equatable, Sendable {
     case invalid(String)
 }
 
+enum OTBGameRestoreError: Error, Equatable {
+    case invalidInitialPosition
+    case invalidMove(ply: Int)
+    case positionMismatch(ply: Int)
+}
+
 struct OTBGameSession: Sendable {
     private struct PendingPromotion: Sendable {
         let move: Move
@@ -43,10 +49,55 @@ struct OTBGameSession: Sendable {
     private(set) var isSynchronized = false
     private var pendingPromotion: PendingPromotion?
 
-    init(position: Position = .standard, startedAt: Date = Date()) {
+    init(
+        position: Position = .standard,
+        startedAt: Date = Date(),
+        whitePlayer: String = "Blancas",
+        blackPlayer: String = "Negras"
+    ) {
         board = Board(position: position)
-        gameRecord = GameRecord(startedAt: startedAt, initialFEN: position.fen)
+        gameRecord = GameRecord(
+            startedAt: startedAt,
+            initialFEN: position.fen,
+            whitePlayer: whitePlayer,
+            blackPlayer: blackPlayer
+        )
         applyTerminalBoardStateIfNeeded(at: startedAt)
+    }
+
+    init(restoring record: GameRecord) throws {
+        guard let position = Position(fen: record.initialFEN) else {
+            throw OTBGameRestoreError.invalidInitialPosition
+        }
+
+        var restoredBoard = Board(position: position)
+        for archivedMove in record.moves.sorted(by: { $0.ply < $1.ply }) {
+            let from = Square(archivedMove.from)
+            let to = Square(archivedMove.to)
+            guard restoredBoard.move(pieceAt: from, to: to) != nil else {
+                throw OTBGameRestoreError.invalidMove(ply: archivedMove.ply)
+            }
+
+            if case let .promotion(promotionMove) = restoredBoard.state {
+                guard let kind = Self.promotionKind(from: archivedMove.promotion) else {
+                    throw OTBGameRestoreError.invalidMove(ply: archivedMove.ply)
+                }
+                _ = restoredBoard.completePromotion(of: promotionMove, to: kind)
+            }
+
+            guard restoredBoard.position.fen == archivedMove.fenAfter else {
+                throw OTBGameRestoreError.positionMismatch(ply: archivedMove.ply)
+            }
+        }
+
+        board = restoredBoard
+        gameRecord = record
+        liftedSquare = nil
+        legalTargets = []
+        lastMove = record.moves.last.map {
+            OTBDetectedMove(from: Square($0.from), to: Square($0.to), san: $0.san)
+        }
+        isSynchronized = false
     }
 
     var logicalPlacement: String {
@@ -73,8 +124,21 @@ struct OTBGameSession: Sendable {
         pendingPromotion != nil
     }
 
-    mutating func reset(startedAt: Date = Date()) {
-        self = OTBGameSession(startedAt: startedAt)
+    mutating func reset(
+        startedAt: Date = Date(),
+        whitePlayer: String = "Blancas",
+        blackPlayer: String = "Negras"
+    ) {
+        self = OTBGameSession(
+            startedAt: startedAt,
+            whitePlayer: whitePlayer,
+            blackPlayer: blackPlayer
+        )
+    }
+
+    mutating func updatePlayers(white: String, black: String) {
+        gameRecord.whitePlayer = white
+        gameRecord.blackPlayer = black
     }
 
     @discardableResult
@@ -336,6 +400,16 @@ struct OTBGameSession: Sendable {
         case .insufficientMaterial: .insufficientMaterial
         case .repetition: .repetition
         case .stalemate: .stalemate
+        }
+    }
+
+    private static func promotionKind(from symbol: String?) -> Piece.Kind? {
+        switch symbol?.uppercased() {
+        case "Q": .queen
+        case "R": .rook
+        case "B": .bishop
+        case "N": .knight
+        default: nil
         }
     }
 

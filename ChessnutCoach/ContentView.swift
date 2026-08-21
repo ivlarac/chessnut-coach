@@ -8,6 +8,7 @@ struct ContentView: View {
     }
 
     @ObservedObject var board: BoardController
+    @ObservedObject var library: GameLibrary
     @StateObject private var engineDiagnostic = EngineDiagnosticController()
     @State private var rankIndex = 0
     @State private var fileIndex = 0
@@ -21,6 +22,7 @@ struct ContentView: View {
                 assistanceSection
                 stockfishSection
                 gameSection
+                librarySection
                 historySection
                 positionSection
                 ledSection
@@ -180,6 +182,12 @@ struct ContentView: View {
 
     private var gameSection: some View {
         Section("Partida OTB") {
+            TextField("Jugador de blancas", text: whitePlayerBinding)
+                .textInputAutocapitalization(.words)
+
+            TextField("Jugador de negras", text: blackPlayerBinding)
+                .textInputAutocapitalization(.words)
+
             LabeledContent("Turno", value: board.sideToMoveLabel)
             LabeledContent(
                 "Tablero",
@@ -225,6 +233,20 @@ struct ContentView: View {
                     presentFinishDialog(.abort)
                 }
             }
+        }
+    }
+
+    private var librarySection: some View {
+        Section("Biblioteca") {
+            NavigationLink {
+                GameLibraryView(library: library, board: board)
+            } label: {
+                LabeledContent("Partidas guardadas", value: "\(library.games.count)")
+            }
+
+            Text("Cada partida se guarda automáticamente desde su primer movimiento y se actualiza al jugar, finalizar o editar los nombres.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -306,9 +328,9 @@ struct ContentView: View {
 
     private var notesSection: some View {
         Section("Estado del proyecto") {
-            Text("Fase 5: Stockfish 18 clasifica en tiempo real los destinos legales de la pieza levantada y controla los patrones LED del Chessnut Air.")
+            Text("Fase 6: las partidas se guardan automáticamente en el dispositivo y pueden abrirse, reproducirse, borrarse y exportarse como PGN.")
 
-            Text("El motor precalcula la evaluación global al comenzar cada turno. Al levantar una pieza sólo analiza sus destinos, y descarta el resultado si la posición física cambia antes de terminar.")
+            Text("La biblioteca conserva jugadores, fecha, resultado, movimientos y duración. Una partida en curso también se recupera al volver a abrir la app.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -325,6 +347,20 @@ struct ContentView: View {
         Binding(
             get: { board.blackAssistanceMode },
             set: { board.setBlackAssistanceMode($0) }
+        )
+    }
+
+    private var whitePlayerBinding: Binding<String> {
+        Binding(
+            get: { board.whitePlayerName },
+            set: { board.setWhitePlayerName($0) }
+        )
+    }
+
+    private var blackPlayerBinding: Binding<String> {
+        Binding(
+            get: { board.blackPlayerName },
+            set: { board.setBlackPlayerName($0) }
         )
     }
 
@@ -348,5 +384,6 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView(board: BoardController())
+    let library = GameLibrary(inMemory: true)
+    ContentView(board: BoardController(library: library), library: library)
 }

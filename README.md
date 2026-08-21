@@ -2,7 +2,7 @@
 
 Aplicación nativa para iOS orientada a partidas OTB con un Chessnut Air y ayudas mediante los LEDs físicos del tablero.
 
-## Estado actual: fase 5 — coaching real con Stockfish 18
+## Estado actual: fase 6 — biblioteca persistente de partidas
 
 Las fases anteriores ya están validadas con un Chessnut Air real:
 
@@ -25,6 +25,15 @@ La fase 5 conecta **Stockfish 18** con la ayuda física del Chessnut Air:
 - si se devuelve o mueve la pieza mientras Stockfish analiza, el resultado anterior se descarta y no puede encender LEDs atrasados;
 - en una promoción se analizan dama, torre, alfil y caballo y la casilla utiliza la valoración de la mejor promoción;
 - el diagnóstico y el coaching comparten una única instancia del motor para no duplicar Stockfish y sus redes NNUE en memoria.
+
+La fase 6 convierte el historial temporal en una biblioteca local:
+
+- Core Data guarda automáticamente cada partida desde el primer movimiento;
+- una partida en curso se reconstruye al volver a abrir la app;
+- cada registro conserva fecha, jugadores, resultado, duración y movimientos;
+- la biblioteca permite abrir y reproducir la partida movimiento a movimiento sobre un tablero;
+- el borrado siempre requiere confirmación;
+- cada partida puede guardarse o compartirse como PGN estándar.
 
 ## Stockfish 18
 
@@ -57,10 +66,10 @@ git submodule update --init --recursive
 - Chessnut Air. Air+, Go y Pro usan el mismo perfil BLE `classic`.
 - Un Apple ID es suficiente para instalar la aplicación en un dispositivo propio mediante el Personal Team gratuito de Xcode.
 
-## Ejecutar la fase 5 en un iPhone
+## Ejecutar la fase 6 en un iPhone
 
 1. Actualiza tu copia local del repositorio.
-2. Selecciona la rama `feature/stockfish-led-coaching`.
+2. Selecciona la rama `feature/persistent-game-library`.
 3. Abre `ChessnutCoach.xcodeproj`.
 4. Selecciona tu Personal Team si Xcode lo solicita.
 5. Selecciona el iPhone como destino y ejecuta la app.
@@ -131,6 +140,34 @@ Validación física obligatoria antes del merge:
 7. con una partida en curso, apaga y enciende el Chessnut para forzar la reconexión;
 8. confirma que la app indica reconexión y recupera la misma partida sin duplicar movimientos.
 
+## Biblioteca persistente
+
+Antes de comenzar se pueden editar los nombres de blancas y negras en **Partida OTB**. Cuando el Chessnut registra el primer movimiento, la partida aparece automáticamente en **Biblioteca → Partidas guardadas**. Cada movimiento posterior actualiza el mismo registro; no crea duplicados.
+
+Al abrir una partida guardada se muestran sus metadatos, un tablero de reproducción, controles anterior/siguiente y la lista SAN completa. **Guardar archivo PGN** abre el selector de archivos de iOS y **Compartir PGN** abre la hoja de compartir.
+
+Si la app se cierra durante una partida con al menos un movimiento, la siguiente apertura recupera el FEN lógico, el turno, los jugadores y el historial. El Chessnut debe colocarse en esa posición guardada antes de continuar.
+
+Validación física obligatoria antes del merge de fase 6:
+
+1. instala la rama `feature/persistent-game-library` sin borrar previamente la app;
+2. abre la app, conecta el Chessnut Air y escribe nombres distintos para blancas y negras;
+3. inicia una partida y juega `1.e4 e5 2.Nf3`;
+4. abre **Biblioteca → Partidas guardadas** y confirma que aparece una sola partida;
+5. verifica nombres, fecha, estado **En juego**, 2 jugadas y una duración coherente;
+6. abre la partida y usa **Anterior/Siguiente** desde la posición inicial hasta `2.Nf3`;
+7. confirma que tablero, SAN y coordenadas cambian en cada paso;
+8. vuelve a la partida física, juega `2...Nc6` y comprueba que la biblioteca sigue teniendo un único registro actualizado;
+9. cierra la app desde el selector de aplicaciones y vuelve a abrirla;
+10. confirma que se recuperan `1.e4 e5 2.Nf3 Nc6`, el turno de blancas y los nombres;
+11. conecta el Chessnut y valida que la partida continúa al colocar/mantener la posición guardada;
+12. finaliza por **Tablas por acuerdo** o **Rendirse** y confirma resultado y duración en la biblioteca;
+13. abre el detalle, pulsa **Guardar archivo PGN** y guarda el archivo en Archivos;
+14. abre el PGN y confirma cabeceras `White`, `Black`, `Date`, `Result` y la secuencia SAN completa;
+15. pulsa **Compartir PGN** y confirma que aparece la hoja de compartir de iOS;
+16. vuelve a la lista, desliza la partida y pulsa **Borrar**; cancela la primera confirmación y verifica que sigue presente;
+17. repite el borrado, confirma **Borrar definitivamente** y verifica que desaparece.
+
 ## Diagnóstico Stockfish 18
 
 La sección **Stockfish 18 · diagnóstico** continúa disponible para pruebas manuales con FEN:
@@ -153,6 +190,8 @@ CI:
 - verifica que Calidad Stockfish no utiliza pistas simuladas como fallback;
 - verifica las directivas de ciclo `active` / `inactive` / `background`;
 - verifica que la desconexión BLE se reenvía tanto al cliente como al coordinador de reconexión;
+- verifica codificación de jugadores y duración, exportación PGN y reconstrucción de sesiones;
+- verifica con Core Data en memoria las operaciones de alta, actualización y borrado sin duplicados;
 - arranca Stockfish 18 realmente en iOS Simulator;
 - analiza los destinos `e2→e3` y `e2→e4` mediante la misma capa de coaching usada por el Chessnut.
 
@@ -169,7 +208,7 @@ Si la aplicación se distribuye a terceros, deberán revisarse y cumplirse las o
 1. Fase 2: base completa de partida — completada.
 2. Fase 3: ayuda por bando y patrones LED — completada y validada físicamente.
 3. Fase 4: Stockfish 18 local — completada y validada físicamente.
-4. **Fase 5: evaluación real de destinos con Stockfish y LEDs por calidad — en validación física.**
-5. Fase 6: persistencia de partidas, eliminación y exportación PGN.
-6. Fase 7: interfaz final e icono de aplicación.
-7. Fase 8: robustez, rendimiento y pruebas de partidas completas.
+4. Fase 5: evaluación real de destinos con Stockfish y LEDs por calidad — completada y validada físicamente.
+5. **Fase 6: persistencia, biblioteca, reproducción, borrado y exportación PGN — en validación física.**
+6. Fase 7: exportación PGN completa y flujos de compartir.
+7. Fase 8: interfaz final, icono, robustez y pruebas de partidas completas.
