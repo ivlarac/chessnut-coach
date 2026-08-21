@@ -23,6 +23,12 @@ final class BoardController: ObservableObject {
     @Published private(set) var isGameFinished = false
     @Published private(set) var isPromotionPending = false
 
+    @Published private(set) var assistanceSettings = AssistanceSettings()
+    @Published private(set) var activeHintSummary = ""
+
+    var whiteAssistanceMode: AssistanceMode { assistanceSettings.white }
+    var blackAssistanceMode: AssistanceMode { assistanceSettings.black }
+
     private var client: EasyLinkClient?
     private var connectionTask: Task<Void, Never>?
     private var fenTask: Task<Void, Never>?
@@ -36,6 +42,7 @@ final class BoardController: ObservableObject {
     private var latestPhysicalPlacement = ""
     private var lastProcessedPlacement = ""
     private let fenSettleDelay: Duration = .milliseconds(100)
+    private let ledTickDelay: Duration = .milliseconds(250)
 
     func connect() {
         guard connectionTask == nil, !isConnected else { return }
@@ -80,6 +87,7 @@ final class BoardController: ObservableObject {
         fenDebounceTask = nil
         ledTask?.cancel()
         ledTask = nil
+        activeHintSummary = ""
 
         guard let client else {
             resetConnectionState()
@@ -106,11 +114,22 @@ final class BoardController: ObservableObject {
     func newGame() {
         gameSession.reset()
         lastProcessedPlacement = ""
+        activeHintSummary = ""
         publishGameState()
         gameStatus = "Nueva partida. Coloca todas las piezas en la posición inicial."
 
         guard let client, !boardPlacement.isEmpty else { return }
         schedulePhysicalPlacement(boardPlacement, client: client, force: true)
+    }
+
+    func setWhiteAssistanceMode(_ mode: AssistanceMode) {
+        assistanceSettings.white = mode
+        refreshCurrentAssistanceIfNeeded()
+    }
+
+    func setBlackAssistanceMode(_ mode: AssistanceMode) {
+        assistanceSettings.black = mode
+        refreshCurrentAssistanceIfNeeded()
     }
 
     func resignCurrentSide() {
@@ -150,6 +169,7 @@ final class BoardController: ObservableObject {
         guard (0..<8).contains(rankIndex), (0..<8).contains(fileIndex) else { return }
 
         ledTask?.cancel()
+        activeHintSummary = ""
         ledTask = Task { [weak self] in
             var leds = LEDBoard.allOff
             leds[rankIndex: rankIndex, fileIndex: fileIndex] = .red
@@ -171,6 +191,7 @@ final class BoardController: ObservableObject {
         guard (0..<8).contains(rankIndex), (0..<8).contains(fileIndex) else { return }
 
         ledTask?.cancel()
+        activeHintSummary = ""
         ledTask = Task { [weak self] in
             var leds = LEDBoard.allOff
             leds[rankIndex: rankIndex, fileIndex: fileIndex] = .red
@@ -187,17 +208,32 @@ final class BoardController: ObservableObject {
 
                 self?.status = "Prueba de parpadeo completada"
             } catch is CancellationError {
-                try? await client.setLEDs(.allOff)
+                // A newer LED request owns the board now.
             } catch {
                 self?.status = "Error parpadeo: \(error.localizedDescription)"
             }
         }
     }
 
+    func demoLEDPatterns() {
+        guard let client else { return }
+
+        let hints = [
+            LEDHint(square: .a1, pattern: .steady),
+            LEDHint(square: .b1, pattern: .slowBlink),
+            LEDHint(square: .c1, pattern: .fastBlink),
+        ]
+
+        activeHintSummary = "a1 fijo · b1 lento · c1 rápido"
+        status = "Prueba simultánea de patrones LED"
+        startLEDHints(hints, client: client)
+    }
+
     func ledsOff() {
         guard let client else { return }
 
         ledTask?.cancel()
+        activeHintSummary = ""
         ledTask = Task { [weak self] in
             do {
                 try await client.setLEDs(.allOff)
@@ -259,6 +295,7 @@ final class BoardController: ObservableObject {
 
         ledTask?.cancel()
         ledTask = nil
+        activeHintSummary = ""
 
         let event = gameSession.process(physicalPlacement: placement)
         publishGameState()
@@ -282,8 +319,24 @@ final class BoardController: ObservableObject {
                     gameStatus = "\(source.notation) no tiene movimientos legales."
                     try await client.setLEDs(.allOff)
                 } else {
-                    gameStatus = "Pieza levantada en \(source.notation). Los LEDs muestran sus destinos legales."
-                    try await client.setLEDs(ledBoard(for: legalTargets))
+                    let mode = assistanceSettings.mode(for: gameSession.sideToMove)
+                    let hints = AssistanceHintPlanner.hints(for: legalTargets, mode: mode)
+
+                    switch mode {
+                    case .off:
+                        gameStatus = "Pieza levantada en \(source.notation). Ayuda desactivada para \(sideToMoveLabel.lowercased())."
+                        try await client.setLEDs(.allOff)
+
+                    case .legalMoves:
+                        gameStatus = "Pieza levantada en \(source.notation). LEDs fijos = destinos legales."
+                        activeHintSummary = hintSummary(hints, includeQuality: false)
+                        startLEDHints(hints, client: client)
+
+                    case .simulatedQuality:
+                        gameStatus = "Pieza levantada en \(source.notation). Calidad simulada: fijo = mejor, lento = jugable, rápido = evitar."
+                        activeHintSummary = hintSummary(hints, includeQuality: true)
+                        startLEDHints(hints, client: client)
+                    }
                 }
 
             case let .moveCompleted(move):
@@ -302,7 +355,18 @@ final class BoardController: ObservableObject {
             case let .intermediate(message):
                 gameStatus = message
                 if !gameSession.legalTargets.isEmpty {
-                    try await client.setLEDs(ledBoard(for: gameSession.legalTargets))
+                    let mode = assistanceSettings.mode(for: gameSession.sideToMove)
+                    let hints = AssistanceHintPlanner.hints(for: gameSession.legalTargets, mode: mode)
+
+                    if hints.isEmpty {
+                        try await client.setLEDs(.allOff)
+                    } else {
+                        activeHintSummary = hintSummary(
+                            hints,
+                            includeQuality: mode == .simulatedQuality
+                        )
+                        startLEDHints(hints, client: client)
+                    }
                 }
 
             case let .invalid(message):
@@ -312,6 +376,85 @@ final class BoardController: ObservableObject {
         } catch {
             status = "Conectado · error LEDs: \(error.localizedDescription)"
         }
+    }
+
+    private func refreshCurrentAssistanceIfNeeded() {
+        guard let client,
+              gameSession.liftedSquare != nil,
+              !gameSession.legalTargets.isEmpty,
+              !gameSession.isFinished
+        else { return }
+
+        ledTask?.cancel()
+        ledTask = nil
+        activeHintSummary = ""
+
+        let mode = assistanceSettings.mode(for: gameSession.sideToMove)
+        let hints = AssistanceHintPlanner.hints(for: gameSession.legalTargets, mode: mode)
+
+        if hints.isEmpty {
+            Task {
+                try? await client.setLEDs(.allOff)
+            }
+            return
+        }
+
+        activeHintSummary = hintSummary(hints, includeQuality: mode == .simulatedQuality)
+        startLEDHints(hints, client: client)
+    }
+
+    private func startLEDHints(_ hints: [LEDHint], client: EasyLinkClient) {
+        ledTask?.cancel()
+
+        guard !hints.isEmpty else {
+            activeHintSummary = ""
+            return
+        }
+
+        let hasBlinkingPattern = hints.contains { $0.pattern != .steady }
+
+        if !hasBlinkingPattern {
+            ledTask = Task { [weak self] in
+                guard let self else { return }
+
+                do {
+                    try await client.setLEDs(self.ledBoard(for: hints.map(\.square)))
+                } catch is CancellationError {
+                    // A newer LED request owns the board now.
+                } catch {
+                    self.status = "Conectado · error LEDs: \(error.localizedDescription)"
+                }
+            }
+            return
+        }
+
+        ledTask = Task { [weak self] in
+            guard let self else { return }
+            var tick = 0
+
+            do {
+                while !Task.isCancelled {
+                    let activeSquares = LEDHintFrameComposer.activeSquares(for: hints, tick: tick)
+                    try await client.setLEDs(self.ledBoard(for: activeSquares))
+                    tick += 1
+                    try await Task.sleep(for: self.ledTickDelay)
+                }
+            } catch is CancellationError {
+                // The next board state or LED request takes ownership immediately.
+            } catch {
+                self.status = "Conectado · error patrones LED: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func hintSummary(_ hints: [LEDHint], includeQuality: Bool) -> String {
+        hints.map { hint in
+            if includeQuality {
+                return "\(hint.square.notation) \(hint.pattern.displayText)/\(hint.pattern.simulatedQualityText)"
+            }
+            return "\(hint.square.notation) \(hint.pattern.displayText)"
+        }
+        .joined(separator: " · ")
     }
 
     private func ledBoard(for squares: [Square]) -> LEDBoard {
@@ -358,6 +501,7 @@ final class BoardController: ObservableObject {
     }
 
     private func turnOffAutomaticLEDs() {
+        activeHintSummary = ""
         guard let client else { return }
         ledTask?.cancel()
         ledTask = Task {
@@ -382,6 +526,7 @@ final class BoardController: ObservableObject {
         latestPhysicalPlacement = ""
         lastProcessedPlacement = ""
         isBoardSynchronized = false
+        activeHintSummary = ""
         gameStatus = "Conecta el tablero para continuar la partida."
     }
 }
