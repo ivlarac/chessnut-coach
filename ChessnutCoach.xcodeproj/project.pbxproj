@@ -13,7 +13,20 @@
 		A10000000000000000000004 /* EasyLinkSwiftSDK in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000001 /* EasyLinkSwiftSDK */; };
 		A10000000000000000000005 /* OTBGameSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000005 /* OTBGameSession.swift */; };
 		A10000000000000000000006 /* ChessKit in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000003 /* ChessKit */; };
+		A10000000000000000000007 /* GameModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000006 /* GameModels.swift */; };
+		A20000000000000000000001 /* OTBGameSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* OTBGameSessionTests.swift */; };
+		A20000000000000000000002 /* ChessKit in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000003 /* ChessKit */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		G20000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E10000000000000000000003 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E10000000000000000000001;
+			remoteInfo = ChessnutCoach;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		B10000000000000000000001 /* ChessnutCoachApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChessnutCoachApp.swift; sourceTree = "<group>"; };
@@ -21,6 +34,9 @@
 		B10000000000000000000003 /* BoardController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardController.swift; sourceTree = "<group>"; };
 		B10000000000000000000004 /* ChessnutCoach.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChessnutCoach.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000005 /* OTBGameSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OTBGameSession.swift; sourceTree = "<group>"; };
+		B10000000000000000000006 /* GameModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameModels.swift; sourceTree = "<group>"; };
+		B20000000000000000000001 /* OTBGameSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OTBGameSessionTests.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* ChessnutCoachTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChessnutCoachTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -33,6 +49,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C20000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A20000000000000000000002 /* ChessKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -40,6 +64,7 @@
 			isa = PBXGroup;
 			children = (
 				D10000000000000000000002 /* ChessnutCoach */,
+				D20000000000000000000001 /* ChessnutCoachTests */,
 				D10000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -50,15 +75,25 @@
 				B10000000000000000000001 /* ChessnutCoachApp.swift */,
 				B10000000000000000000002 /* ContentView.swift */,
 				B10000000000000000000003 /* BoardController.swift */,
+				B10000000000000000000006 /* GameModels.swift */,
 				B10000000000000000000005 /* OTBGameSession.swift */,
 			);
 			path = ChessnutCoach;
+			sourceTree = "<group>";
+		};
+		D20000000000000000000001 /* ChessnutCoachTests */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* OTBGameSessionTests.swift */,
+			);
+			path = ChessnutCoachTests;
 			sourceTree = "<group>";
 		};
 		D10000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				B10000000000000000000004 /* ChessnutCoach.app */,
+				B20000000000000000000002 /* ChessnutCoachTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -87,6 +122,27 @@
 			productReference = B10000000000000000000004 /* ChessnutCoach.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E20000000000000000000001 /* ChessnutCoachTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E20000000000000000000002 /* Build configuration list for PBXNativeTarget "ChessnutCoachTests" */;
+			buildPhases = (
+				C20000000000000000000002 /* Sources */,
+				C20000000000000000000001 /* Frameworks */,
+				C20000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				G20000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = ChessnutCoachTests;
+			packageProductDependencies = (
+				F10000000000000000000003 /* ChessKit */,
+			);
+			productName = ChessnutCoachTests;
+			productReference = B20000000000000000000002 /* ChessnutCoachTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -99,6 +155,10 @@
 				TargetAttributes = {
 					E10000000000000000000001 = {
 						CreatedOnToolsVersion = 26.0;
+					};
+					E20000000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = E10000000000000000000001;
 					};
 				};
 			};
@@ -120,12 +180,20 @@
 			projectRoot = "";
 			targets = (
 				E10000000000000000000001 /* ChessnutCoach */,
+				E20000000000000000000001 /* ChessnutCoachTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		C10000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C20000000000000000000003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -142,11 +210,28 @@
 				A10000000000000000000001 /* ChessnutCoachApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* BoardController.swift in Sources */,
+				A10000000000000000000007 /* GameModels.swift in Sources */,
 				A10000000000000000000005 /* OTBGameSession.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C20000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A20000000000000000000001 /* OTBGameSessionTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		G20000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E10000000000000000000001 /* ChessnutCoach */;
+			targetProxy = G20000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		E10000000000000000000005 /* Debug */ = {
@@ -186,14 +271,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chessnut Coach necesita Bluetooth para conectarse al tablero Chessnut.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.0.2;
+				MARKETING_VERSION = 0.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ivlarac.chessnutcoach;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -209,14 +294,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chessnut Coach necesita Bluetooth para conectarse al tablero Chessnut.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.0.2;
+				MARKETING_VERSION = 0.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ivlarac.chessnutcoach;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -225,6 +310,42 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E20000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ivlarac.chessnutcoach.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ChessnutCoach.app/ChessnutCoach";
+			};
+			name = Debug;
+		};
+		E20000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ivlarac.chessnutcoach.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ChessnutCoach.app/ChessnutCoach";
 			};
 			name = Release;
 		};
@@ -245,6 +366,15 @@
 			buildConfigurations = (
 				E10000000000000000000005 /* Debug */,
 				E10000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E20000000000000000000002 /* Build configuration list for PBXNativeTarget "ChessnutCoachTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E20000000000000000000003 /* Debug */,
+				E20000000000000000000004 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

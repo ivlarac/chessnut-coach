@@ -1,14 +1,15 @@
-name: iOS Build
+name: iOS Build & Tests
 
 on:
   pull_request:
   push:
     branches:
-      - poc/chessnut-air-ble
+      - main
 
 jobs:
-  build:
+  build-and-test:
     runs-on: macos-latest
+    timeout-minutes: 12
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,3 +29,6 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Run game-core unit tests
+        run: swift test

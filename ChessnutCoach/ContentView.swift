@@ -1,20 +1,54 @@
 import SwiftUI
 
 struct ContentView: View {
+    private enum FinishAction: String {
+        case resign
+        case draw
+        case abort
+    }
+
     @StateObject private var board = BoardController()
     @State private var rankIndex = 0
     @State private var fileIndex = 0
+    @State private var finishAction: FinishAction?
+    @State private var isFinishDialogPresented = false
 
     var body: some View {
         NavigationStack {
             Form {
                 connectionSection
                 gameSection
+                historySection
                 positionSection
                 ledSection
                 notesSection
             }
             .navigationTitle("Chessnut Coach")
+            .confirmationDialog(
+                finishDialogTitle,
+                isPresented: $isFinishDialogPresented,
+                titleVisibility: .visible
+            ) {
+                switch finishAction {
+                case .resign:
+                    Button("Confirmar abandono", role: .destructive) {
+                        board.resignCurrentSide()
+                        finishAction = nil
+                    }
+                case .draw:
+                    Button("Confirmar tablas") {
+                        board.agreeDraw()
+                        finishAction = nil
+                    }
+                case .abort:
+                    Button("Cancelar partida", role: .destructive) {
+                        board.abortGame()
+                        finishAction = nil
+                    }
+                case nil:
+                    EmptyView()
+                }
+            }
         }
     }
 
@@ -49,6 +83,7 @@ struct ContentView: View {
                 "Tablero",
                 value: board.isBoardSynchronized ? "Sincronizado" : "En movimiento"
             )
+            LabeledContent("Resultado", value: board.gameResultLabel)
 
             Text(board.gameStatus)
 
@@ -64,14 +99,46 @@ struct ContentView: View {
                 LabeledContent("Último movimiento", value: lastMove)
             }
 
+            if board.isPromotionPending {
+                Text("Promoción pendiente: sustituye físicamente el peón por dama, torre, alfil o caballo. La jugada no se guarda hasta reconocer la nueva pieza.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             Button("Nueva partida desde posición inicial") {
                 board.newGame()
             }
             .disabled(!board.isConnected)
 
-            Text("Empieza con las piezas en su posición inicial. Al levantar una pieza del jugador que tiene el turno, el Chessnut Air iluminará únicamente sus destinos legales. Al colocarla en un destino legal, la app registrará el movimiento y cambiará el turno.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            if !board.isGameFinished && board.moveCount > 0 {
+                Button("Rendirse (\(board.sideToMoveLabel))", role: .destructive) {
+                    presentFinishDialog(.resign)
+                }
+
+                Button("Tablas por acuerdo") {
+                    presentFinishDialog(.draw)
+                }
+
+                Button("Cancelar partida sin resultado", role: .destructive) {
+                    presentFinishDialog(.abort)
+                }
+            }
+        }
+    }
+
+    private var historySection: some View {
+        Section("Historial de la partida") {
+            LabeledContent("Medios movimientos", value: "\(board.moveCount)")
+
+            if board.moveHistory.isEmpty {
+                Text("Todavía no hay movimientos registrados.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(board.moveHistory.enumerated()), id: \.offset) { _, row in
+                    Text(row)
+                        .font(.system(.body, design: .monospaced))
+                }
+            }
         }
     }
 
@@ -128,12 +195,30 @@ struct ContentView: View {
 
     private var notesSection: some View {
         Section("Estado del proyecto") {
-            Text("Esta versión ya incluye reglas de ajedrez y seguimiento básico de una partida OTB. Todavía no incluye Stockfish ni clasificación de jugadas por calidad.")
+            Text("La sesión mantiene ahora el historial completo, estado y resultado de la partida. Capturas, enroque y en passant siguen validándose contra la posición física final.")
 
-            Text("Capturas, enroque y en passant se validan comparando el estado físico final con todas las transiciones legales posibles. La promoción se completará en una fase posterior.")
+            Text("Las promociones se completan al sustituir físicamente el peón por dama, torre, alfil o caballo. La persistencia de partidas y la exportación PGN llegarán en una fase posterior.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var finishDialogTitle: String {
+        switch finishAction {
+        case .resign:
+            "¿Confirmar que \(board.sideToMoveLabel.lowercased()) abandonan?"
+        case .draw:
+            "¿Confirmar tablas por acuerdo?"
+        case .abort:
+            "¿Cancelar esta partida sin resultado?"
+        case nil:
+            "Finalizar partida"
+        }
+    }
+
+    private func presentFinishDialog(_ action: FinishAction) {
+        finishAction = action
+        isFinishDialogPresented = true
     }
 }
 
