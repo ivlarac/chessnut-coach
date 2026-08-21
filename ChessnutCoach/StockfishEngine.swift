@@ -20,7 +20,7 @@ enum StockfishScore: Equatable, Sendable {
     var displayText: String {
         switch self {
         case let .centipawns(value):
-            String(format: "%+.2f", Double(value) / 100.0)
+            return String(format: "%+.2f", Double(value) / 100.0)
         case let .mate(plies):
             let moves = max(1, (abs(plies) + 1) / 2)
             return plies >= 0 ? "Mate en \(moves)" : "Recibe mate en \(moves)"
