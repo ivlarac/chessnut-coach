@@ -67,13 +67,25 @@ enum PGNExporter {
             header("Event", value: "Chessnut Coach OTB"),
             header("Site", value: "Chessnut Air"),
             header("Date", value: pgnDate(record.startedAt)),
+            header("Round", value: "-"),
             header("White", value: normalizedPlayer(record.whitePlayer, fallback: "White")),
             header("Black", value: normalizedPlayer(record.blackPlayer, fallback: "Black")),
             header("Result", value: record.result.pgnValue),
-        ] + setupHeaders(for: record)
+        ] + setupHeaders(for: record) + [
+            header("PlyCount", value: String(record.moves.count)),
+            header("Termination", value: termination(for: record)),
+        ]
 
-        let moveText = formattedMoves(record.moves, result: record.result.pgnValue)
+        let moveText = formattedMoves(
+            record.moves,
+            initialFEN: record.initialFEN,
+            result: record.result.pgnValue
+        )
         return (headers + ["", moveText]).joined(separator: "\n") + "\n"
+    }
+
+    static func data(for record: GameRecord) -> Data {
+        Data(pgn(for: record).utf8)
     }
 
     static func suggestedFilename(for record: GameRecord) -> String {
@@ -96,18 +108,54 @@ enum PGNExporter {
         ]
     }
 
-    private static func formattedMoves(_ moves: [GameMoveRecord], result: String) -> String {
+    private static func formattedMoves(
+        _ moves: [GameMoveRecord],
+        initialFEN: String,
+        result: String
+    ) -> String {
         var tokens: [String] = []
+        let fields = initialFEN.split(separator: " ")
+        var isWhiteToMove = fields.count > 1 ? fields[1] != "b" : true
+        var fullMoveNumber = fields.count > 5 ? Int(fields[5]) ?? 1 : 1
 
-        for (index, move) in moves.enumerated() {
-            if index.isMultiple(of: 2) {
-                tokens.append("\((index / 2) + 1).")
+        for move in moves {
+            if isWhiteToMove {
+                tokens.append("\(fullMoveNumber).")
+            } else if tokens.isEmpty {
+                tokens.append("\(fullMoveNumber)...")
             }
             tokens.append(move.san)
+
+            if isWhiteToMove {
+                isWhiteToMove = false
+            } else {
+                isWhiteToMove = true
+                fullMoveNumber += 1
+            }
         }
 
         tokens.append(result)
-        return tokens.joined(separator: " ")
+        return wrapped(tokens, maximumLineLength: 80)
+    }
+
+    private static func wrapped(_ tokens: [String], maximumLineLength: Int) -> String {
+        var lines: [String] = []
+        var currentLine = ""
+
+        for token in tokens {
+            let candidate = currentLine.isEmpty ? token : currentLine + " " + token
+            if candidate.count <= maximumLineLength || currentLine.isEmpty {
+                currentLine = candidate
+            } else {
+                lines.append(currentLine)
+                currentLine = token
+            }
+        }
+
+        if !currentLine.isEmpty {
+            lines.append(currentLine)
+        }
+        return lines.joined(separator: "\n")
     }
 
     private static func pgnDate(_ date: Date) -> String {
@@ -125,6 +173,17 @@ enum PGNExporter {
     private static func normalizedPlayer(_ value: String, fallback: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private static func termination(for record: GameRecord) -> String {
+        switch record.status {
+        case .playing:
+            "unterminated"
+        case .aborted:
+            "abandoned"
+        case .finished:
+            "normal"
+        }
     }
 
     private static func header(_ name: String, value: String) -> String {

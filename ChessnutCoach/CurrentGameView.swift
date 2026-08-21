@@ -1,0 +1,356 @@
+import SwiftUI
+
+struct CurrentGameView: View {
+    private enum FinishAction: String {
+        case resign
+        case draw
+        case abort
+    }
+
+    @ObservedObject var board: BoardController
+    @State private var finishAction: FinishAction?
+    @State private var isFinishDialogPresented = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 16) {
+                    connectionCard
+                    gameCard
+                    assistanceCard
+                    historyCard
+                }
+                .padding()
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("Chessnut Coach")
+            .confirmationDialog(
+                finishDialogTitle,
+                isPresented: $isFinishDialogPresented,
+                titleVisibility: .visible
+            ) {
+                finishDialogButtons
+            }
+        }
+    }
+
+    private var connectionCard: some View {
+        CoachCard("Chessnut Air", systemImage: "dot.radiowaves.left.and.right") {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    StatusPill(
+                        text: board.isConnected ? "Conectado" : "Desconectado",
+                        systemImage: board.isConnected ? "checkmark.circle.fill" : "circle",
+                        color: board.isConnected ? .green : .secondary
+                    )
+                    Text(board.status)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if let battery = board.batteryPercentage {
+                    Label("\(battery)%", systemImage: batterySymbol(for: battery))
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(battery > 20 ? Color.primary : Color.red)
+                }
+            }
+
+            HStack {
+                if board.isConnected {
+                    Button("Actualizar batería") {
+                        board.refreshBattery()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Desconectar", role: .destructive) {
+                        board.disconnect()
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button {
+                        board.connect()
+                    } label: {
+                        Label("Conectar tablero", systemImage: "link")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+    }
+
+    private var gameCard: some View {
+        CoachCard("Partida actual", systemImage: "checkerboard.rectangle") {
+            VStack(spacing: 12) {
+                playerField(
+                    title: "Blancas",
+                    symbolColor: .white,
+                    selection: whitePlayerBinding
+                )
+                Divider()
+                playerField(
+                    title: "Negras",
+                    symbolColor: .black,
+                    selection: blackPlayerBinding
+                )
+            }
+
+            HStack(spacing: 8) {
+                metric(title: "Turno", value: board.sideToMoveLabel)
+                metric(
+                    title: "Tablero",
+                    value: board.isBoardSynchronized ? "Listo" : "Moviendo"
+                )
+                metric(title: "Resultado", value: board.gameResultLabel)
+            }
+
+            Text(board.gameStatus)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let liftedSquare = board.liftedSquare {
+                Label("Pieza levantada: \(liftedSquare)", systemImage: "hand.raised")
+                    .font(.subheadline.weight(.medium))
+            }
+
+            if !board.legalTargets.isEmpty {
+                Text("Destinos: \(board.legalTargets.joined(separator: ", "))")
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if board.isPromotionPending {
+                Label(
+                    "Sustituye físicamente el peón por la pieza elegida para completar la promoción.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.footnote)
+                .foregroundStyle(.orange)
+            }
+
+            Button {
+                board.newGame()
+            } label: {
+                Label("Nueva partida", systemImage: "plus.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!board.isConnected)
+
+            if !board.isGameFinished && board.moveCount > 0 {
+                Menu {
+                    Button("Tablas por acuerdo") {
+                        presentFinishDialog(.draw)
+                    }
+                    Button("Rendirse", role: .destructive) {
+                        presentFinishDialog(.resign)
+                    }
+                    Button("Cancelar sin resultado", role: .destructive) {
+                        presentFinishDialog(.abort)
+                    }
+                } label: {
+                    Label("Finalizar partida…", systemImage: "flag.checkered")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private var assistanceCard: some View {
+        CoachCard("Ayuda por bando", systemImage: "lightbulb.max.fill") {
+            assistancePicker(
+                title: "Blancas",
+                mode: board.whiteAssistanceMode,
+                selection: whiteAssistanceBinding
+            )
+
+            Divider()
+
+            assistancePicker(
+                title: "Negras",
+                mode: board.blackAssistanceMode,
+                selection: blackAssistanceBinding
+            )
+
+            if !board.activeHintSummary.isEmpty {
+                Label(board.activeHintSummary, systemImage: "light.beacon.max")
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(Color.coachAccent)
+            }
+
+            Text("Calidad Stockfish: fijo hasta 50 cp, lento entre 51 y 200 cp y rápido por encima de 200 cp.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var historyCard: some View {
+        CoachCard("Últimas jugadas", systemImage: "list.number") {
+            if board.moveHistory.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                    Text("Sin movimientos")
+                        .font(.headline)
+                    Text("El historial aparecerá al empezar la partida.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            } else {
+                ForEach(Array(board.moveHistory.suffix(8).enumerated()), id: \.offset) { _, row in
+                    Text(row)
+                        .font(.body.monospaced())
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if board.moveHistory.count > 8 {
+                    Text("\(board.moveHistory.count - 8) movimientos anteriores en la partida guardada")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func playerField(
+        title: String,
+        symbolColor: Color,
+        selection: Binding<String>
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "circle.fill")
+                .foregroundStyle(symbolColor)
+                .shadow(color: .primary.opacity(0.35), radius: symbolColor == .white ? 1 : 0)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 62, alignment: .leading)
+            TextField("Jugador", text: selection)
+                .textInputAutocapitalization(.words)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func metric(title: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+        .background(Color(uiColor: .tertiarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func assistancePicker(
+        title: String,
+        mode: AssistanceMode,
+        selection: Binding<AssistanceMode>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Picker("Ayuda para \(title.lowercased())", selection: selection) {
+                Text("No").tag(AssistanceMode.off)
+                Text("Legales").tag(AssistanceMode.legalMoves)
+                Text("Calidad").tag(AssistanceMode.stockfishQuality)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("Ayuda para \(title.lowercased())")
+            Text(mode.detailText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var finishDialogButtons: some View {
+        switch finishAction {
+        case .resign:
+            Button("Confirmar abandono", role: .destructive) {
+                board.resignCurrentSide()
+                finishAction = nil
+            }
+        case .draw:
+            Button("Confirmar tablas") {
+                board.agreeDraw()
+                finishAction = nil
+            }
+        case .abort:
+            Button("Cancelar partida", role: .destructive) {
+                board.abortGame()
+                finishAction = nil
+            }
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private var whiteAssistanceBinding: Binding<AssistanceMode> {
+        Binding(
+            get: { board.whiteAssistanceMode },
+            set: { board.setWhiteAssistanceMode($0) }
+        )
+    }
+
+    private var blackAssistanceBinding: Binding<AssistanceMode> {
+        Binding(
+            get: { board.blackAssistanceMode },
+            set: { board.setBlackAssistanceMode($0) }
+        )
+    }
+
+    private var whitePlayerBinding: Binding<String> {
+        Binding(
+            get: { board.whitePlayerName },
+            set: { board.setWhitePlayerName($0) }
+        )
+    }
+
+    private var blackPlayerBinding: Binding<String> {
+        Binding(
+            get: { board.blackPlayerName },
+            set: { board.setBlackPlayerName($0) }
+        )
+    }
+
+    private var finishDialogTitle: String {
+        switch finishAction {
+        case .resign:
+            "¿Confirmar que \(board.sideToMoveLabel.lowercased()) abandonan?"
+        case .draw:
+            "¿Confirmar tablas por acuerdo?"
+        case .abort:
+            "¿Cancelar esta partida sin resultado?"
+        case nil:
+            "Finalizar partida"
+        }
+    }
+
+    private func presentFinishDialog(_ action: FinishAction) {
+        finishAction = action
+        isFinishDialogPresented = true
+    }
+
+    private func batterySymbol(for percentage: Int) -> String {
+        switch percentage {
+        case 76...: "battery.100percent"
+        case 51...: "battery.75percent"
+        case 26...: "battery.50percent"
+        case 11...: "battery.25percent"
+        default: "battery.0percent"
+        }
+    }
+}

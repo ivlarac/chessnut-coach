@@ -123,11 +123,13 @@ struct GameDetailView: View {
     @State private var isExporting = false
     @State private var exportError: String?
     @State private var exportDocument: PGNFileDocument
+    @State private var shareFileURL: URL?
 
     init(game: GameRecord) {
         self.game = game
         _selectedPly = State(initialValue: game.moves.count)
         _exportDocument = State(initialValue: PGNFileDocument(text: PGNExporter.pgn(for: game)))
+        _shareFileURL = State(initialValue: try? PGNShareFile.make(for: game))
     }
 
     var body: some View {
@@ -205,12 +207,24 @@ struct GameDetailView: View {
                     Label("Guardar archivo PGN", systemImage: "square.and.arrow.down")
                 }
 
-                ShareLink(
-                    item: PGNExporter.pgn(for: game),
-                    subject: Text("Partida Chessnut Coach"),
-                    message: Text("\(game.whitePlayer) – \(game.blackPlayer)")
-                ) {
-                    Label("Compartir PGN", systemImage: "square.and.arrow.up")
+                if let shareFileURL {
+                    ShareLink(
+                        item: shareFileURL,
+                        subject: Text("Partida Chessnut Coach"),
+                        message: Text("\(game.whitePlayer) – \(game.blackPlayer)")
+                    ) {
+                        Label("Compartir archivo PGN", systemImage: "square.and.arrow.up")
+                    }
+                } else {
+                    Button {
+                        do {
+                            shareFileURL = try PGNShareFile.make(for: game)
+                        } catch {
+                            exportError = error.localizedDescription
+                        }
+                    } label: {
+                        Label("Preparar archivo PGN", systemImage: "arrow.clockwise")
+                    }
                 }
             }
         }
@@ -218,7 +232,7 @@ struct GameDetailView: View {
         .fileExporter(
             isPresented: $isExporting,
             document: exportDocument,
-            contentType: .plainText,
+            contentType: .portableGameNotation,
             defaultFilename: PGNExporter.suggestedFilename(for: game)
         ) { result in
             if case let .failure(error) = result {
@@ -303,7 +317,7 @@ private extension ReplayPiece {
 }
 
 private struct PGNFileDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.plainText] }
+    static var readableContentTypes: [UTType] { [.portableGameNotation] }
     var text: String
 
     init(text: String) {
@@ -322,6 +336,27 @@ private struct PGNFileDocument: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: Data(text.utf8))
     }
+}
+
+private enum PGNShareFile {
+    static func make(for game: GameRecord) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChessnutCoach-PGN", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let url = directory.appendingPathComponent(PGNExporter.suggestedFilename(for: game))
+        try PGNExporter.data(for: game).write(to: url, options: .atomic)
+        return url
+    }
+}
+
+private extension UTType {
+    static let portableGameNotation = UTType(
+        exportedAs: "com.ivlarac.chessnutcoach.pgn",
+        conformingTo: .plainText
+    )
 }
 
 private func formatDuration(_ interval: TimeInterval) -> String {

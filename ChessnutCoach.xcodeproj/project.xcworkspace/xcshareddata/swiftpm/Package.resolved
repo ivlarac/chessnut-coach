@@ -1,0 +1,24 @@
+{
+  "originHash" : "bdaf574e1fe7c5b5899d21f929726e60c30823903aa3f2e3c937c0cf933f15d1",
+  "pins" : [
+    {
+      "identity" : "chesskit-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/chesskit-app/chesskit-swift.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "c29bdfbab1c5b131f15fac475ceeed27feb28d83"
+      }
+    },
+    {
+      "identity" : "easylinkswiftsdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NSStudent/EasyLinkSwiftSDK.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "1b9710593b192ae102f8a1fd695467c9eb990535"
+      }
+    }
+  ],
+  "version" : 3
+}

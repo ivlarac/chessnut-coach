@@ -2,7 +2,7 @@
 
 Aplicación nativa para iOS orientada a partidas OTB con un Chessnut Air y ayudas mediante los LEDs físicos del tablero.
 
-## Estado actual: fase 6 — biblioteca persistente de partidas
+## Estado actual: fases 7 y 8 — PGN final e interfaz de aplicación
 
 Las fases anteriores ya están validadas con un Chessnut Air real:
 
@@ -35,6 +35,18 @@ La fase 6 convierte el historial temporal en una biblioteca local:
 - el borrado siempre requiere confirmación;
 - cada partida puede guardarse o compartirse como PGN estándar.
 
+Las fases 7 y 8 se entregan juntas en una única PR:
+
+- el PGN incluye las siete cabeceras básicas, posición inicial no estándar, número de medios movimientos y terminación;
+- la numeración respeta partidas que comienzan con negras y el número de movimiento incluido en el FEN;
+- el texto de jugadas mantiene SAN de capturas, enroques, en passant, promociones, jaques y mates, con líneas de hasta 80 caracteres;
+- **Guardar** y **Compartir** entregan un archivo `.pgn` real reconocido por iOS;
+- la navegación se divide en **Jugar**, **Partidas** y **Diagnóstico**;
+- la pantalla principal prioriza conexión, estado de partida, jugadores, ayuda y últimas jugadas;
+- el diagnóstico de Stockfish, posiciones y LEDs permanece disponible sin ocupar la pantalla de juego;
+- la app incorpora un icono propio y una identidad visual coherente;
+- la versión de la app pasa a `0.0.5`.
+
 ## Stockfish 18
 
 La integración utiliza exactamente la release oficial `sf_18`, fijada al commit `cb3d4ee9b47d0c5aae855b12379378ea1439675c`:
@@ -66,10 +78,10 @@ git submodule update --init --recursive
 - Chessnut Air. Air+, Go y Pro usan el mismo perfil BLE `classic`.
 - Un Apple ID es suficiente para instalar la aplicación en un dispositivo propio mediante el Personal Team gratuito de Xcode.
 
-## Ejecutar la fase 6 en un iPhone
+## Ejecutar las fases 7 y 8 en un iPhone
 
 1. Actualiza tu copia local del repositorio.
-2. Selecciona la rama `feature/persistent-game-library`.
+2. Selecciona la rama `feature/final-pgn-app-polish`.
 3. Abre `ChessnutCoach.xcodeproj`.
 4. Selecciona tu Personal Team si Xcode lo solicita.
 5. Selecciona el iPhone como destino y ejecuta la app.
@@ -144,7 +156,7 @@ Validación física obligatoria antes del merge:
 
 Antes de comenzar se pueden editar los nombres de blancas y negras en **Partida OTB**. Cuando el Chessnut registra el primer movimiento, la partida aparece automáticamente en **Biblioteca → Partidas guardadas**. Cada movimiento posterior actualiza el mismo registro; no crea duplicados.
 
-Al abrir una partida guardada se muestran sus metadatos, un tablero de reproducción, controles anterior/siguiente y la lista SAN completa. **Guardar archivo PGN** abre el selector de archivos de iOS y **Compartir PGN** abre la hoja de compartir.
+Al abrir una partida guardada se muestran sus metadatos, un tablero de reproducción, controles anterior/siguiente y la lista SAN completa. **Guardar archivo PGN** abre el selector de archivos de iOS y **Compartir archivo PGN** abre la hoja de compartir con un adjunto `.pgn` real.
 
 Si la app se cierra durante una partida con al menos un movimiento, la siguiente apertura recupera el FEN lógico, el turno, los jugadores y el historial. El Chessnut debe colocarse en esa posición guardada antes de continuar.
 
@@ -178,6 +190,28 @@ La sección **Stockfish 18 · diagnóstico** continúa disponible para pruebas m
 
 El diagnóstico reutiliza el mismo motor que el coaching OTB.
 
+## Validación física de las fases 7 y 8
+
+Antes del merge de esta PR:
+
+1. instala la rama `feature/final-pgn-app-polish` sobre la versión anterior, sin borrar datos;
+2. confirma que aparece el icono nuevo y que las partidas anteriores continúan en **Partidas**;
+3. recorre las tres pestañas y comprueba que **Jugar**, **Partidas** y **Diagnóstico** mantienen su estado;
+4. conecta el Chessnut Air desde **Jugar** y verifica estado y batería;
+5. juega una partida que contenga una captura y, si es posible, enroque o promoción;
+6. comprueba que ayuda por bando, LEDs, historial y finalización funcionan igual que antes;
+7. abre la partida en **Partidas**, recórrela completa y confirma colores y posiciones;
+8. guarda el PGN en Archivos y confirma extensión `.pgn`, cabeceras, SAN y resultado;
+9. comparte el PGN por la hoja de iOS y confirma que el receptor recibe un archivo, no texto suelto;
+10. abre **Diagnóstico**, analiza las dos FEN de ejemplo y prueba los patrones LED;
+11. cierra y vuelve a abrir la app para confirmar la recuperación de la partida y de la biblioteca.
+
+## Fase 9 prevista: juego en solitario
+
+Tras validar y fusionar esta PR se añadirá un modo contra Stockfish. Permitirá elegir blancas o negras, seleccionar la fuerza del motor de menor a mayor y ejecutar físicamente en el Chessnut la jugada que Stockfish sugiera en cada turno suyo.
+
+La versión fijada del motor admite `Skill Level` de 0 a 20 y fuerza limitada mediante `UCI_Elo` de 1320 a 3190. El nivel máximo utilizará Stockfish sin limitación. La propuesta completa, persistencia, estados y criterios de aceptación están en [`PHASE_9_SOLO_MODE.md`](PHASE_9_SOLO_MODE.md).
+
 ## Pruebas automáticas
 
 CI:
@@ -209,6 +243,6 @@ Si la aplicación se distribuye a terceros, deberán revisarse y cumplirse las o
 2. Fase 3: ayuda por bando y patrones LED — completada y validada físicamente.
 3. Fase 4: Stockfish 18 local — completada y validada físicamente.
 4. Fase 5: evaluación real de destinos con Stockfish y LEDs por calidad — completada y validada físicamente.
-5. **Fase 6: persistencia, biblioteca, reproducción, borrado y exportación PGN — en validación física.**
-6. Fase 7: exportación PGN completa y flujos de compartir.
-7. Fase 8: interfaz final, icono, robustez y pruebas de partidas completas.
+5. Fase 6: persistencia, biblioteca, reproducción, borrado y exportación PGN — completada y validada físicamente.
+6. **Fases 7 y 8: exportación PGN completa, compartir archivos, interfaz final, icono y robustez — en una única PR, pendiente de validación física.**
+7. Fase 9: juego en solitario contra Stockfish, elección de color y fuerza — especificada, pendiente de implementar tras las fases 7 y 8.
