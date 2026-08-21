@@ -144,7 +144,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
 enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case off
     case legalMoves
-    case simulatedQuality
+    case stockfishQuality
 
     var id: String { rawValue }
 
@@ -154,8 +154,8 @@ enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
             "Sin ayuda"
         case .legalMoves:
             "Movimientos legales"
-        case .simulatedQuality:
-            "Calidad simulada"
+        case .stockfishQuality:
+            "Calidad Stockfish"
         }
     }
 
@@ -165,8 +165,8 @@ enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
             "No ilumina destinos al levantar una pieza."
         case .legalMoves:
             "Ilumina todos los destinos legales de forma fija."
-        case .simulatedQuality:
-            "Prueba el futuro sistema de calidad: fijo, parpadeo lento y parpadeo rápido."
+        case .stockfishQuality:
+            "Stockfish 18 compara cada destino con la mejor jugada de la posición: fijo = bueno, lento = aceptable, rápido = blunder."
         }
     }
 }
@@ -176,7 +176,7 @@ struct AssistanceSettings: Equatable, Codable, Sendable {
     var black: AssistanceMode
 
     init(
-        white: AssistanceMode = .simulatedQuality,
+        white: AssistanceMode = .stockfishQuality,
         black: AssistanceMode = .off
     ) {
         self.white = white
@@ -201,14 +201,6 @@ enum LEDPattern: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    var simulatedQualityText: String {
-        switch self {
-        case .steady: "mejor"
-        case .slowBlink: "jugable"
-        case .fastBlink: "evitar"
-        }
-    }
-
     func isLit(at tick: Int) -> Bool {
         switch self {
         case .steady:
@@ -218,6 +210,44 @@ enum LEDPattern: String, CaseIterable, Codable, Sendable {
         case .fastBlink:
             tick.isMultiple(of: 2)
         }
+    }
+}
+
+enum MoveQuality: String, CaseIterable, Codable, Sendable {
+    case good
+    case acceptable
+    case blunder
+
+    var displayText: String {
+        switch self {
+        case .good: "bueno"
+        case .acceptable: "aceptable"
+        case .blunder: "blunder"
+        }
+    }
+
+    var ledPattern: LEDPattern {
+        switch self {
+        case .good: .steady
+        case .acceptable: .slowBlink
+        case .blunder: .fastBlink
+        }
+    }
+}
+
+struct MoveQualityThresholds: Equatable, Sendable {
+    var goodMaxCentipawnLoss: Int = 50
+    var acceptableMaxCentipawnLoss: Int = 200
+
+    func classify(loss: Int) -> MoveQuality {
+        let normalizedLoss = max(0, loss)
+        if normalizedLoss <= goodMaxCentipawnLoss {
+            return .good
+        }
+        if normalizedLoss <= acceptableMaxCentipawnLoss {
+            return .acceptable
+        }
+        return .blunder
     }
 }
 
@@ -234,31 +264,10 @@ enum AssistanceHintPlanner {
         let sortedTargets = legalTargets.sorted { $0.notation < $1.notation }
 
         switch mode {
-        case .off:
+        case .off, .stockfishQuality:
             return []
-
         case .legalMoves:
             return sortedTargets.map { LEDHint(square: $0, pattern: .steady) }
-
-        case .simulatedQuality:
-            guard !sortedTargets.isEmpty else { return [] }
-            guard sortedTargets.count > 1 else {
-                return [LEDHint(square: sortedTargets[0], pattern: .steady)]
-            }
-
-            return sortedTargets.enumerated().map { index, square in
-                let pattern: LEDPattern
-
-                if index == 0 {
-                    pattern = .steady
-                } else if index == sortedTargets.count - 1 {
-                    pattern = .fastBlink
-                } else {
-                    pattern = .slowBlink
-                }
-
-                return LEDHint(square: square, pattern: pattern)
-            }
         }
     }
 }
