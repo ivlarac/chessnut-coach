@@ -25,6 +25,8 @@ let package = Package(
                 "ChessnutCoachApp.swift",
                 "ContentView.swift",
                 "EngineDiagnosticController.swift",
+                "GameLibrary.swift",
+                "GameLibraryView.swift",
                 "Info.plist",
                 "MonitoredEasyLinkTransport.swift",
                 "StockfishEngine.swift",
@@ -34,6 +36,7 @@ let package = Package(
                 "ChessnutCoach-Bridging-Header.h"
             ],
             sources: [
+                "GameArchive.swift",
                 "GameModels.swift",
                 "OTBGameSession.swift"
             ]

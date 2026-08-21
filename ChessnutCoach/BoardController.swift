@@ -22,12 +22,15 @@ final class BoardController: ObservableObject {
     @Published private(set) var gameResultLabel = "En juego"
     @Published private(set) var isGameFinished = false
     @Published private(set) var isPromotionPending = false
+    @Published private(set) var whitePlayerName = "Blancas"
+    @Published private(set) var blackPlayerName = "Negras"
 
     @Published private(set) var assistanceSettings = AssistanceSettings()
     @Published private(set) var activeHintSummary = ""
 
     var whiteAssistanceMode: AssistanceMode { assistanceSettings.white }
     var blackAssistanceMode: AssistanceMode { assistanceSettings.black }
+    var currentGameID: UUID { gameSession.gameRecord.id }
 
     private var client: EasyLinkClient?
     private var connectionTask: Task<Void, Never>?
@@ -41,6 +44,7 @@ final class BoardController: ObservableObject {
     private var prewarmTask: Task<Void, Never>?
     private var gameSession = OTBGameSession()
     private let stockfishCoach = StockfishMoveCoach()
+    private weak var gameLibrary: GameLibrary?
 
     private var currentStockfishHints: [StockfishMoveHint] = []
     private var currentStockfishHintFEN: String?
@@ -62,6 +66,18 @@ final class BoardController: ObservableObject {
 
     private var logicalFEN: String {
         gameSession.board.position.fen
+    }
+
+    init(library: GameLibrary? = nil) {
+        gameLibrary = library
+
+        if let savedGame = library?.resumableGame,
+           let restoredSession = try? OTBGameSession(restoring: savedGame) {
+            gameSession = restoredSession
+            gameStatus = "Partida recuperada. Conecta el tablero y coloca la posición guardada para continuar."
+        }
+
+        publishGameState()
     }
 
     func connect() {
@@ -178,7 +194,15 @@ final class BoardController: ObservableObject {
 
     func newGame() {
         invalidateTransientAssistance(turnOffLEDs: isConnected)
-        gameSession.reset()
+
+        let white = normalizedPlayerName(whitePlayerName, fallback: "Blancas")
+        let black = normalizedPlayerName(blackPlayerName, fallback: "Negras")
+        if !gameSession.moves.isEmpty, !gameSession.isFinished {
+            gameSession.abort()
+            persistCurrentGameIfNeeded()
+        }
+
+        gameSession.reset(whitePlayer: white, blackPlayer: black)
         lastProcessedPlacement = ""
         activeHintSummary = ""
         publishGameState()
@@ -200,11 +224,24 @@ final class BoardController: ObservableObject {
         scheduleStockfishPrewarmIfNeeded()
     }
 
+    func setWhitePlayerName(_ name: String) {
+        whitePlayerName = name
+        gameSession.updatePlayers(white: name, black: blackPlayerName)
+        persistCurrentGameIfNeeded()
+    }
+
+    func setBlackPlayerName(_ name: String) {
+        blackPlayerName = name
+        gameSession.updatePlayers(white: whitePlayerName, black: name)
+        persistCurrentGameIfNeeded()
+    }
+
     func resignCurrentSide() {
         guard !gameSession.isFinished else { return }
         let resigningColor = gameSession.sideToMove
         let result = gameSession.resign(color: resigningColor)
         publishGameState()
+        persistCurrentGameIfNeeded()
         gameStatus = result.displayText
         turnOffAutomaticLEDs()
     }
@@ -213,6 +250,7 @@ final class BoardController: ObservableObject {
         guard !gameSession.isFinished else { return }
         let result = gameSession.agreeDraw()
         publishGameState()
+        persistCurrentGameIfNeeded()
         gameStatus = result.displayText
         turnOffAutomaticLEDs()
     }
@@ -221,8 +259,24 @@ final class BoardController: ObservableObject {
         guard !gameSession.isFinished else { return }
         gameSession.abort()
         publishGameState()
+        persistCurrentGameIfNeeded()
         gameStatus = "Partida cancelada sin resultado."
         turnOffAutomaticLEDs()
+    }
+
+    func deleteArchivedGame(_ game: GameRecord) {
+        if game.id == gameSession.gameRecord.id {
+            invalidateTransientAssistance(turnOffLEDs: isConnected)
+            gameSession.reset(
+                whitePlayer: normalizedPlayerName(whitePlayerName, fallback: "Blancas"),
+                blackPlayer: normalizedPlayerName(blackPlayerName, fallback: "Negras")
+            )
+            lastProcessedPlacement = ""
+            publishGameState()
+            gameStatus = "Partida borrada. Coloca las piezas en la posición inicial para comenzar otra."
+        }
+
+        gameLibrary?.delete(game)
     }
 
     func squareNotation(rankIndex: Int, fileIndex: Int) -> String {
@@ -498,6 +552,9 @@ final class BoardController: ObservableObject {
 
         let event = gameSession.process(physicalPlacement: placement)
         publishGameState()
+        if case .moveCompleted = event {
+            persistCurrentGameIfNeeded()
+        }
 
         do {
             switch event {
@@ -833,6 +890,8 @@ final class BoardController: ObservableObject {
         gameResultLabel = gameSession.result.displayText
         isGameFinished = gameSession.isFinished
         isPromotionPending = gameSession.isPromotionPending
+        whitePlayerName = gameSession.gameRecord.whitePlayer
+        blackPlayerName = gameSession.gameRecord.blackPlayer
     }
 
     private func formattedMoveHistory(_ moves: [GameMoveRecord]) -> [String] {
@@ -850,6 +909,16 @@ final class BoardController: ObservableObject {
         }
 
         return rows
+    }
+
+    private func persistCurrentGameIfNeeded() {
+        guard !gameSession.moves.isEmpty else { return }
+        gameLibrary?.upsert(gameSession.gameRecord)
+    }
+
+    private func normalizedPlayerName(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
     }
 
     private func turnOffAutomaticLEDs() {

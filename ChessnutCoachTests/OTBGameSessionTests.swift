@@ -122,7 +122,7 @@ final class OTBGameSessionTests: XCTestCase {
         var session = OTBGameSession(position: position)
         var physicalBoard = Board(position: position)
 
-        let promotionMove = try XCTUnwrap(physicalBoard.move(pieceAt: .e7, to: .e8))
+        _ = try XCTUnwrap(physicalBoard.move(pieceAt: .e7, to: .e8))
         let pawnPlacement = placement(from: physicalBoard.position.fen)
 
         let pendingEvent = session.process(physicalPlacement: pawnPlacement)
@@ -147,7 +147,6 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(session.moves.count, 1)
         XCTAssertEqual(session.moves[0].promotion, "Q")
         XCTAssertFalse(session.isPromotionPending)
-        _ = promotionMove
     }
 
     func testFoolsMateFinishesGame() {
@@ -246,6 +245,100 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(lifecycle.transition(to: .active), .none)
     }
 
+    func testGameRecordRoundTripsPlayersAndDuration() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let end = start.addingTimeInterval(125)
+        let record = GameRecord(
+            startedAt: start,
+            initialFEN: Position.standard.fen,
+            whitePlayer: "Ana",
+            blackPlayer: "Luis",
+            endedAt: end,
+            status: .finished,
+            result: .draw(reason: .agreement)
+        )
+
+        let data = try JSONEncoder().encode(record)
+        let decoded = try JSONDecoder().decode(GameRecord.self, from: data)
+
+        XCTAssertEqual(decoded, record)
+        XCTAssertEqual(decoded.whitePlayer, "Ana")
+        XCTAssertEqual(decoded.blackPlayer, "Luis")
+        XCTAssertEqual(decoded.duration, 125, accuracy: 0.001)
+    }
+
+    func testPGNExporterIncludesMetadataMovesAndResult() {
+        let date = Date(timeIntervalSince1970: 1_704_110_400) // 2024-01-01 UTC
+        let moves = [
+            GameMoveRecord(
+                ply: 1,
+                san: "e4",
+                lan: "e2e4",
+                from: "e2",
+                to: "e4",
+                fenBefore: Position.standard.fen,
+                fenAfter: "after-e4",
+                playedAt: date
+            ),
+            GameMoveRecord(
+                ply: 2,
+                san: "e5",
+                lan: "e7e5",
+                from: "e7",
+                to: "e5",
+                fenBefore: "after-e4",
+                fenAfter: "after-e5",
+                playedAt: date
+            ),
+            GameMoveRecord(
+                ply: 3,
+                san: "Nf3",
+                lan: "g1f3",
+                from: "g1",
+                to: "f3",
+                fenBefore: "after-e5",
+                fenAfter: "after-nf3",
+                playedAt: date
+            ),
+        ]
+        let record = GameRecord(
+            startedAt: date,
+            initialFEN: Position.standard.fen,
+            whitePlayer: "Ana \"A\"",
+            blackPlayer: "Luis",
+            endedAt: date,
+            moves: moves,
+            status: .finished,
+            result: .whiteWin(reason: .resignation)
+        )
+
+        let pgn = PGNExporter.pgn(for: record)
+
+        XCTAssertTrue(pgn.contains("[White \"Ana \\\"A\\\"\"]"))
+        XCTAssertTrue(pgn.contains("[Black \"Luis\"]"))
+        XCTAssertTrue(pgn.contains("[Result \"1-0\"]"))
+        XCTAssertTrue(pgn.contains("1. e4 e5 2. Nf3 1-0"))
+        XCTAssertFalse(pgn.contains("[SetUp"))
+    }
+
+    func testReplayAndSessionRestoreReturnEveryArchivedPosition() throws {
+        var session = OTBGameSession(whitePlayer: "Ana", blackPlayer: "Luis")
+        var physicalBoard = Board()
+
+        _ = apply(.e2, .e4, to: &session, physicalBoard: &physicalBoard)
+        _ = apply(.e7, .e5, to: &session, physicalBoard: &physicalBoard)
+
+        let record = session.gameRecord
+        let restored = try OTBGameSession(restoring: record)
+
+        XCTAssertEqual(restored.gameRecord, record)
+        XCTAssertEqual(restored.board.position.fen, session.board.position.fen)
+        XCTAssertEqual(restored.sideToMove, .white)
+        XCTAssertEqual(GameReplay.fen(for: record, afterPly: 0), record.initialFEN)
+        XCTAssertEqual(GameReplay.fen(for: record, afterPly: 1), record.moves[0].fenAfter)
+        XCTAssertEqual(GameReplay.fen(for: record, afterPly: 2), record.moves[1].fenAfter)
+    }
+
     func testLEDFrameComposerKeepsSteadyWhileBlinkPatternsChange() {
         let hints = [
             LEDHint(square: .a1, pattern: .steady),
@@ -276,6 +369,66 @@ final class OTBGameSessionTests: XCTestCase {
     }
 
 #if !SWIFT_PACKAGE
+    @MainActor
+    func testCoreDataLibraryUpsertsUpdatesAndDeletesGame() {
+        let library = GameLibrary(inMemory: true)
+        var record = GameRecord(initialFEN: Position.standard.fen)
+        record.moves = [
+            GameMoveRecord(
+                ply: 1,
+                san: "e4",
+                lan: "e2e4",
+                from: "e2",
+                to: "e4",
+                fenBefore: Position.standard.fen,
+                fenAfter: "after-e4"
+            )
+        ]
+
+        library.upsert(record)
+        XCTAssertEqual(library.games, [record])
+
+        record.whitePlayer = "Ana"
+        library.upsert(record)
+        XCTAssertEqual(library.games.count, 1)
+        XCTAssertEqual(library.games.first?.whitePlayer, "Ana")
+
+        library.delete(record)
+        XCTAssertTrue(library.games.isEmpty)
+    }
+
+    @MainActor
+    func testCoreDataLibrarySurvivesStoreReload() {
+        let storeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("sqlite")
+        var record = GameRecord(
+            initialFEN: Position.standard.fen,
+            whitePlayer: "Ana",
+            blackPlayer: "Luis"
+        )
+        record.moves = [
+            GameMoveRecord(
+                ply: 1,
+                san: "e4",
+                lan: "e2e4",
+                from: "e2",
+                to: "e4",
+                fenBefore: Position.standard.fen,
+                fenAfter: "after-e4"
+            )
+        ]
+
+        do {
+            let firstLaunch = GameLibrary(storeURL: storeURL)
+            firstLaunch.upsert(record)
+            XCTAssertEqual(firstLaunch.games.count, 1)
+        }
+
+        let secondLaunch = GameLibrary(storeURL: storeURL)
+        XCTAssertEqual(secondLaunch.games, [record])
+    }
+
     func testMonitoredTransportBroadcastsDisconnectWithoutHidingItFromClientStream() async {
         let underlying = TestEasyLinkTransport()
         let monitored = MonitoredEasyLinkTransport(wrapping: underlying)

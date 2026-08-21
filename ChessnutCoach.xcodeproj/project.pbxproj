@@ -17,6 +17,9 @@
 		A10000000000000000000008 /* StockfishEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* StockfishEngine.swift */; };
 		A10000000000000000000009 /* EngineDiagnosticController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* EngineDiagnosticController.swift */; };
 		A1000000000000000000000A /* MonitoredEasyLinkTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* MonitoredEasyLinkTransport.swift */; };
+		A1000000000000000000000B /* GameArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000B /* GameArchive.swift */; };
+		A1000000000000000000000C /* GameLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000C /* GameLibrary.swift */; };
+		A1000000000000000000000D /* GameLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000D /* GameLibraryView.swift */; };
 		A20000000000000000000001 /* OTBGameSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* OTBGameSessionTests.swift */; };
 		A20000000000000000000002 /* ChessKit in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000003 /* ChessKit */; };
 /* End PBXBuildFile section */
@@ -42,6 +45,9 @@
 		B10000000000000000000008 /* EngineDiagnosticController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineDiagnosticController.swift; sourceTree = "<group>"; };
 		B10000000000000000000009 /* MonitoredEasyLinkTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoredEasyLinkTransport.swift; sourceTree = "<group>"; };
 		B1000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B1000000000000000000000B /* GameArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameArchive.swift; sourceTree = "<group>"; };
+		B1000000000000000000000C /* GameLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLibrary.swift; sourceTree = "<group>"; };
+		B1000000000000000000000D /* GameLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLibraryView.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 /* OTBGameSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OTBGameSessionTests.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* ChessnutCoachTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChessnutCoachTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -84,6 +90,9 @@
 				B10000000000000000000003 /* BoardController.swift */,
 				B10000000000000000000006 /* GameModels.swift */,
 				B10000000000000000000005 /* OTBGameSession.swift */,
+				B1000000000000000000000B /* GameArchive.swift */,
+				B1000000000000000000000C /* GameLibrary.swift */,
+				B1000000000000000000000D /* GameLibraryView.swift */,
 				B10000000000000000000007 /* StockfishEngine.swift */,
 				B10000000000000000000008 /* EngineDiagnosticController.swift */,
 				B10000000000000000000009 /* MonitoredEasyLinkTransport.swift */,
@@ -264,6 +273,9 @@
 				A10000000000000000000008 /* StockfishEngine.swift in Sources */,
 				A10000000000000000000009 /* EngineDiagnosticController.swift in Sources */,
 				A1000000000000000000000A /* MonitoredEasyLinkTransport.swift in Sources */,
+				A1000000000000000000000B /* GameArchive.swift in Sources */,
+				A1000000000000000000000C /* GameLibrary.swift in Sources */,
+				A1000000000000000000000D /* GameLibraryView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

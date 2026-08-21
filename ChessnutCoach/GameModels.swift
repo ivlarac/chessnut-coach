@@ -159,6 +159,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     let startedAt: Date
     let initialFEN: String
+    var whitePlayer: String
+    var blackPlayer: String
     var endedAt: Date?
     var moves: [GameMoveRecord]
     var status: GameLifecycleStatus
@@ -168,6 +170,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         id: UUID = UUID(),
         startedAt: Date = Date(),
         initialFEN: String,
+        whitePlayer: String = "Blancas",
+        blackPlayer: String = "Negras",
         endedAt: Date? = nil,
         moves: [GameMoveRecord] = [],
         status: GameLifecycleStatus = .playing,
@@ -176,6 +180,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         self.id = id
         self.startedAt = startedAt
         self.initialFEN = initialFEN
+        self.whitePlayer = whitePlayer
+        self.blackPlayer = blackPlayer
         self.endedAt = endedAt
         self.moves = moves
         self.status = status
@@ -183,6 +189,40 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
     }
 
     var moveCount: Int { moves.count }
+    var fullMoveCount: Int { (moves.count + 1) / 2 }
+
+    var lastActivityAt: Date {
+        endedAt ?? moves.last?.playedAt ?? startedAt
+    }
+
+    var duration: TimeInterval {
+        max(0, lastActivityAt.timeIntervalSince(startedAt))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case startedAt
+        case initialFEN
+        case whitePlayer
+        case blackPlayer
+        case endedAt
+        case moves
+        case status
+        case result
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        initialFEN = try container.decode(String.self, forKey: .initialFEN)
+        whitePlayer = try container.decodeIfPresent(String.self, forKey: .whitePlayer) ?? "Blancas"
+        blackPlayer = try container.decodeIfPresent(String.self, forKey: .blackPlayer) ?? "Negras"
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        moves = try container.decode([GameMoveRecord].self, forKey: .moves)
+        status = try container.decode(GameLifecycleStatus.self, forKey: .status)
+        result = try container.decode(GameResult.self, forKey: .result)
+    }
 }
 
 enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
