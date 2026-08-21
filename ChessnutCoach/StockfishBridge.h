@@ -37,6 +37,7 @@ bool CCStockfishSearch(
     const char *fen,
     uint64_t nodeLimit,
     int32_t depthLimit,
+    int32_t strengthElo,
     int32_t *scoreKind,
     int32_t *scoreValue,
     int32_t *depth,

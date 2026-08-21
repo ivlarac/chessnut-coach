@@ -1,6 +1,6 @@
-# Fase 9 — juego en solitario contra Stockfish
+# Fase 9 — juego en solitario y análisis con Stockfish
 
-Esta fase se implementará después de validar y fusionar conjuntamente las fases 7 y 8. No forma parte de la PR actual.
+Implementada en una PR apilada sobre las fases 7 y 8.
 
 ## Objetivo
 
@@ -61,3 +61,9 @@ En reconexión o reapertura, si era turno de Stockfish, se reconstruirá la part
 - La reconexión y el relanzamiento de la app no duplican ni pierden la jugada pendiente.
 - El resultado, la biblioteca, la reproducción y el PGN siguen funcionando en modo solitario.
 - Hay tests unitarios del mapeo de niveles, de la máquina de estados y de ambos colores, además de una validación completa con Chessnut Air real.
+
+## Análisis integrado en partidas guardadas
+
+La antigua pantalla independiente de diagnóstico se integra en el detalle de una partida finalizada. El reproductor analiza con Stockfish cada FEN seleccionado y actualiza evaluación, mejor movimiento y una barra vertical a la izquierda del tablero.
+
+La evaluación se normaliza siempre a la perspectiva de blancas. `+0,00` produce una barra con mitad blanca y mitad negra; las ventajas positivas o negativas aumentan suavemente el color correspondiente. Los mates son estados completos: `#3` es 100 % blanco y `#-1` es 100 % negro. Los resultados obsoletos se descartan al cambiar rápidamente de movimiento.

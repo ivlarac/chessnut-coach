@@ -2,7 +2,7 @@
 
 Aplicación nativa para iOS orientada a partidas OTB con un Chessnut Air y ayudas mediante los LEDs físicos del tablero.
 
-## Estado actual: fases 7 y 8 — PGN final e interfaz de aplicación
+## Estado actual: fase 9 — juego en solitario y análisis de partidas
 
 Las fases anteriores ya están validadas con un Chessnut Air real:
 
@@ -47,6 +47,18 @@ Las fases 7 y 8 se entregan juntas en una única PR:
 - la app incorpora un icono propio y una identidad visual coherente;
 - la versión de la app pasa a `0.0.5`.
 
+La fase 9 añade:
+
+- partidas físicas en solitario eligiendo blancas o negras;
+- fuerza de Stockfish configurable entre 1320 y 3190 Elo o sin limitación;
+- sugerencia del motor visible en pantalla, con origen fijo y destino intermitente en los LEDs;
+- confirmación física obligatoria de la jugada exacta antes de avanzar el turno;
+- persistencia del modo, color, nivel, motor y autor de cada movimiento;
+- análisis Stockfish de partidas finalizadas dentro de **Partidas**;
+- barra vertical junto al tablero que se actualiza en cada posición reproducida: `+0,00` queda al 50 %, una ventaja positiva amplía blancas, una negativa amplía negras y un mate llena por completo el color ganador;
+- navegación final simplificada a **Jugar** y **Partidas**, con el análisis integrado en la partida guardada.
+- la versión de la app pasa a `0.0.6`.
+
 ## Stockfish 18
 
 La integración utiliza exactamente la release oficial `sf_18`, fijada al commit `cb3d4ee9b47d0c5aae855b12379378ea1439675c`:
@@ -78,10 +90,10 @@ git submodule update --init --recursive
 - Chessnut Air. Air+, Go y Pro usan el mismo perfil BLE `classic`.
 - Un Apple ID es suficiente para instalar la aplicación en un dispositivo propio mediante el Personal Team gratuito de Xcode.
 
-## Ejecutar las fases 7 y 8 en un iPhone
+## Ejecutar la fase 9 en un iPhone
 
 1. Actualiza tu copia local del repositorio.
-2. Selecciona la rama `feature/final-pgn-app-polish`.
+2. Selecciona la rama `feature/solo-stockfish-game-analysis`.
 3. Abre `ChessnutCoach.xcodeproj`.
 4. Selecciona tu Personal Team si Xcode lo solicita.
 5. Selecciona el iPhone como destino y ejecuta la app.
@@ -180,15 +192,11 @@ Validación física obligatoria antes del merge de fase 6:
 16. vuelve a la lista, desliza la partida y pulsa **Borrar**; cancela la primera confirmación y verifica que sigue presente;
 17. repite el borrado, confirma **Borrar definitivamente** y verifica que desaparece.
 
-## Diagnóstico Stockfish 18
+## Análisis Stockfish de partidas guardadas
 
-La sección **Stockfish 18 · diagnóstico** continúa disponible para pruebas manuales con FEN:
+El diagnóstico se integra en **Partidas**. Al abrir una partida finalizada, Stockfish analiza la posición seleccionada en el reproductor. Los botones **Anterior** y **Siguiente**, el stepper y la lista de movimientos actualizan automáticamente evaluación, mejor movimiento y barra lateral.
 
-1. pulsa **Inicial** y después **Analizar FEN con Stockfish 18**;
-2. debe aparecer `Stockfish 18`, un `bestmove`, evaluación, profundidad y nodos;
-3. pulsa **Tras 1.e4** y repite el análisis.
-
-El diagnóstico reutiliza el mismo motor que el coaching OTB.
+La puntuación se presenta siempre desde el punto de vista de blancas, aunque sea turno de negras. `+0,00` divide la barra exactamente a la mitad; `#3` ocupa toda la barra con blancas y `#-1` la ocupa por completo con negras.
 
 ## Validación física de las fases 7 y 8
 
@@ -206,11 +214,24 @@ Antes del merge de esta PR:
 10. abre **Diagnóstico**, analiza las dos FEN de ejemplo y prueba los patrones LED;
 11. cierra y vuelve a abrir la app para confirmar la recuperación de la partida y de la biblioteca.
 
-## Fase 9 prevista: juego en solitario
+## Fase 9: juego en solitario
 
-Tras validar y fusionar esta PR se añadirá un modo contra Stockfish. Permitirá elegir blancas o negras, seleccionar la fuerza del motor de menor a mayor y ejecutar físicamente en el Chessnut la jugada que Stockfish sugiera en cada turno suyo.
+El modo contra Stockfish permite elegir blancas o negras, seleccionar la fuerza del motor de menor a mayor y ejecutar físicamente en el Chessnut la jugada sugerida en cada turno del motor.
 
-La versión fijada del motor admite `Skill Level` de 0 a 20 y fuerza limitada mediante `UCI_Elo` de 1320 a 3190. El nivel máximo utilizará Stockfish sin limitación. La propuesta completa, persistencia, estados y criterios de aceptación están en [`PHASE_9_SOLO_MODE.md`](PHASE_9_SOLO_MODE.md).
+La versión fijada del motor admite fuerza limitada mediante `UCI_Elo` de 1320 a 3190. El nivel máximo utiliza Stockfish sin limitación. El diseño, persistencia, estados y criterios de aceptación están en [`PHASE_9_SOLO_MODE.md`](PHASE_9_SOLO_MODE.md).
+
+## Validación física de la fase 9
+
+1. crea una partida en solitario con blancas y nivel 1320;
+2. juega una jugada humana y confirma que aparece una respuesta de Stockfish en pantalla y LEDs;
+3. intenta otra jugada legal del bando negro y confirma que no se registra;
+4. ejecuta la jugada propuesta y confirma que se guarda una única vez;
+5. repite jugando con negras y confirma que Stockfish propone la primera jugada al sincronizar;
+6. cierra y abre la app con una jugada del motor pendiente y confirma que se recalcula sin duplicarla;
+7. finaliza la partida, ábrela en **Partidas** y recorre todos los movimientos;
+8. confirma que evaluación, mejor jugada y barra lateral cambian con cada posición;
+9. comprueba visualmente `+0,00`, una ventaja de blancas, una de negras y posiciones de mate para ambos bandos;
+10. exporta el PGN y confirma las etiquetas `Mode`, `HumanSide`, `Engine` y `EngineStrength`.
 
 ## Pruebas automáticas
 
@@ -244,5 +265,5 @@ Si la aplicación se distribuye a terceros, deberán revisarse y cumplirse las o
 3. Fase 4: Stockfish 18 local — completada y validada físicamente.
 4. Fase 5: evaluación real de destinos con Stockfish y LEDs por calidad — completada y validada físicamente.
 5. Fase 6: persistencia, biblioteca, reproducción, borrado y exportación PGN — completada y validada físicamente.
-6. **Fases 7 y 8: exportación PGN completa, compartir archivos, interfaz final, icono y robustez — en una única PR, pendiente de validación física.**
-7. Fase 9: juego en solitario contra Stockfish, elección de color y fuerza — especificada, pendiente de implementar tras las fases 7 y 8.
+6. Fases 7 y 8: exportación PGN completa, compartir archivos, interfaz final, icono y robustez — completadas.
+7. **Fase 9: juego en solitario, fuerza configurable y análisis dinámico de partidas guardadas — implementada, pendiente de validación física.**

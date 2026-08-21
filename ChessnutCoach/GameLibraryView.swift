@@ -98,6 +98,9 @@ private struct GameSummaryRow: View {
             HStack(spacing: 12) {
                 Label("\(game.fullMoveCount) jugadas", systemImage: "arrow.left.arrow.right")
                 Label(formatDuration(game.duration), systemImage: "clock")
+                if game.mode == .solo {
+                    Label("Solitario", systemImage: "person.fill")
+                }
                 if isCurrent && game.status == .playing {
                     Label("Actual", systemImage: "circle.fill")
                         .foregroundStyle(.green)
@@ -124,6 +127,7 @@ struct GameDetailView: View {
     @State private var exportError: String?
     @State private var exportDocument: PGNFileDocument
     @State private var shareFileURL: URL?
+    @StateObject private var analysis = ArchivedGameAnalysisController()
 
     init(game: GameRecord) {
         self.game = game
@@ -143,12 +147,48 @@ struct GameDetailView: View {
                 LabeledContent("Resultado", value: game.result.displayText)
                 LabeledContent("Jugadas", value: "\(game.fullMoveCount) (\(game.moveCount) medios movimientos)")
                 LabeledContent("Duración", value: formatDuration(game.duration))
+                LabeledContent("Modo", value: game.mode.displayText)
+                if game.mode == .solo {
+                    LabeledContent("Tu color", value: game.humanSide?.displayText ?? "—")
+                    LabeledContent("Nivel", value: game.engineStrength?.displayText ?? "Máxima")
+                }
             }
 
-            Section("Reproducción") {
-                ReplayBoardView(fen: GameReplay.fen(for: game, afterPly: selectedPly))
-                    .aspectRatio(1, contentMode: .fit)
-                    .listRowInsets(EdgeInsets())
+            Section(game.status == .finished ? "Análisis" : "Reproducción") {
+                if game.status == .finished {
+                    HStack(alignment: .top, spacing: 8) {
+                        EvaluationBarView(
+                            evaluation: analysis.evaluation,
+                            isAnalyzing: analysis.isAnalyzing
+                        )
+                        .frame(width: 42)
+
+                        ReplayBoardView(fen: replayFEN)
+                            .aspectRatio(1, contentMode: .fit)
+                    }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+
+                    LabeledContent("Evaluación") {
+                        if analysis.isAnalyzing {
+                            ProgressView()
+                        } else {
+                            Text(analysis.evaluation?.displayText ?? "—")
+                                .font(.body.monospacedDigit())
+                        }
+                    }
+                    LabeledContent("Mejor movimiento", value: analysis.bestMove)
+                    Text(analysis.status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ReplayBoardView(fen: replayFEN)
+                        .aspectRatio(1, contentMode: .fit)
+                        .listRowInsets(EdgeInsets())
+
+                    Text("Finaliza la partida para activar el análisis posición a posición con Stockfish.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
 
                 Stepper(value: $selectedPly, in: 0...game.moves.count) {
                     if let move = GameReplay.move(for: game, atPly: selectedPly) {
@@ -229,6 +269,14 @@ struct GameDetailView: View {
             }
         }
         .navigationTitle("Detalle")
+        .task(id: selectedPly) {
+            if game.status == .finished {
+                analysis.analyze(fen: replayFEN)
+            }
+        }
+        .onDisappear {
+            analysis.cancel()
+        }
         .fileExporter(
             isPresented: $isExporting,
             document: exportDocument,
@@ -247,6 +295,10 @@ struct GameDetailView: View {
         } message: {
             Text(exportError ?? "Error desconocido")
         }
+    }
+
+    private var replayFEN: String {
+        GameReplay.fen(for: game, afterPly: selectedPly)
     }
 }
 

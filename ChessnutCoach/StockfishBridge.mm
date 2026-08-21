@@ -31,6 +31,8 @@ constexpr const char *kBigNetworkName = "nn-c288c895ea92.nnue";
 constexpr const char *kSmallNetworkName = "nn-37f18f62d772.nnue";
 constexpr const char *kStartFEN =
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+constexpr std::int32_t kMinimumElo = 1320;
+constexpr std::int32_t kMaximumElo = 3190;
 
 std::once_flag gInitialization;
 
@@ -181,6 +183,7 @@ bool CCStockfishSearch(
     const char *fen,
     uint64_t nodeLimit,
     int32_t depthLimit,
+    int32_t strengthElo,
     int32_t *scoreKind,
     int32_t *scoreValue,
     int32_t *depth,
@@ -203,10 +206,21 @@ bool CCStockfishSearch(
     if (nodeLimit == 0 && depthLimit <= 0) {
         return fail("El análisis necesita un límite de nodos o profundidad.", error, errorCap);
     }
+    if (strengthElo != 0 && (strengthElo < kMinimumElo || strengthElo > kMaximumElo)) {
+        return fail("El nivel Elo solicitado no está soportado por Stockfish.", error, errorCap);
+    }
 
     try {
         std::lock_guard operationLock(engine->operationMutex);
         engine->searching.store(true);
+
+        if (strengthElo == 0) {
+            setOption(*engine->engine, "UCI_LimitStrength", "false");
+            setOption(*engine->engine, "Skill Level", "20");
+        } else {
+            setOption(*engine->engine, "UCI_LimitStrength", "true");
+            setOption(*engine->engine, "UCI_Elo", std::to_string(strengthElo));
+        }
 
         NativeResult result;
         std::mutex resultMutex;

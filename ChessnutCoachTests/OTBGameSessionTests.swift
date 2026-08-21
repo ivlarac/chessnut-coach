@@ -54,6 +54,85 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(session.sideToMove, .white)
     }
 
+    func testSoloEngineTurnAcceptsOnlySuggestedPhysicalMove() throws {
+        var session = OTBGameSession(
+            whitePlayer: "Stockfish 18",
+            blackPlayer: "Jugador",
+            mode: .solo,
+            humanSide: .black,
+            engineStrength: StockfishStrength(elo: 1_600),
+            engineName: "Stockfish 18"
+        )
+        let expected = try XCTUnwrap(OTBExpectedMove(uci: "e2e4"))
+
+        var wrongBoard = Board()
+        _ = try XCTUnwrap(wrongBoard.move(pieceAt: .d2, to: .d4))
+        let wrongEvent = session.process(
+            physicalPlacement: placement(from: wrongBoard.position.fen),
+            requiredMove: expected
+        )
+        guard case .invalid = wrongEvent else {
+            return XCTFail("A different legal engine move must be rejected")
+        }
+        XCTAssertTrue(session.moves.isEmpty)
+
+        var expectedBoard = Board()
+        _ = try XCTUnwrap(expectedBoard.move(pieceAt: .e2, to: .e4))
+        let expectedEvent = session.process(
+            physicalPlacement: placement(from: expectedBoard.position.fen),
+            requiredMove: expected
+        )
+        guard case .moveCompleted = expectedEvent else {
+            return XCTFail("The suggested move should complete")
+        }
+        XCTAssertEqual(session.moves.first?.lan, "e2e4")
+        XCTAssertEqual(session.moves.first?.participant, .engine)
+    }
+
+    func testSoloConfigurationAndMoveOwnershipSurviveRoundTrip() throws {
+        var session = OTBGameSession(
+            whitePlayer: "Jugador",
+            blackPlayer: "Stockfish 18",
+            mode: .solo,
+            humanSide: .white,
+            engineStrength: StockfishStrength(elo: 2_050),
+            engineName: "Stockfish 18"
+        )
+        var physicalBoard = Board()
+        _ = apply(.e2, .e4, to: &session, physicalBoard: &physicalBoard)
+
+        let data = try JSONEncoder().encode(session.gameRecord)
+        let decoded = try JSONDecoder().decode(GameRecord.self, from: data)
+
+        XCTAssertEqual(decoded.mode, .solo)
+        XCTAssertEqual(decoded.humanSide, .white)
+        XCTAssertEqual(decoded.engineStrength, StockfishStrength(elo: 2_050))
+        XCTAssertEqual(decoded.engineName, "Stockfish 18")
+        XCTAssertEqual(decoded.moves.first?.participant, .human)
+
+        let restored = try OTBGameSession(restoring: decoded)
+        XCTAssertEqual(restored.moves.count, 1)
+        XCTAssertEqual(restored.sideToMove, .black)
+    }
+
+    func testEvaluationBarIsCenteredAndMatesFillOneSide() {
+        XCTAssertEqual(WhitePositionEvaluation.centipawns(0).whiteShare, 0.5, accuracy: 0.000_001)
+        XCTAssertGreaterThan(WhitePositionEvaluation.centipawns(48).whiteShare, 0.5)
+        XCTAssertLessThan(WhitePositionEvaluation.centipawns(-324).whiteShare, 0.5)
+        XCTAssertEqual(WhitePositionEvaluation.mate(5).whiteShare, 1)
+        XCTAssertEqual(WhitePositionEvaluation.mate(-1).whiteShare, 0)
+        XCTAssertEqual(WhitePositionEvaluation.centipawns(48).displayText, "+0,48")
+        XCTAssertEqual(WhitePositionEvaluation.centipawns(-324).displayText, "-3,24")
+        XCTAssertEqual(WhitePositionEvaluation.mate(5).displayText, "#3")
+        XCTAssertEqual(WhitePositionEvaluation.mate(-1).displayText, "#-1")
+    }
+
+    func testStockfishStrengthClampsToSupportedEloRange() {
+        XCTAssertEqual(StockfishStrength(elo: 100).elo, StockfishStrength.minimumElo)
+        XCTAssertEqual(StockfishStrength(elo: 9_999).elo, StockfishStrength.maximumElo)
+        XCTAssertNil(StockfishStrength.full.elo)
+    }
+
     func testCaptureIsRecorded() {
         var session = OTBGameSession()
         var physicalBoard = Board()
@@ -536,6 +615,24 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(secondLaunch.games, [record])
     }
 
+    @MainActor
+    func testEmptySoloGameCanResumeBeforeFirstMove() {
+        let library = GameLibrary(inMemory: true)
+        let record = GameRecord(
+            initialFEN: Position.standard.fen,
+            whitePlayer: "Stockfish 18",
+            blackPlayer: "Jugador",
+            mode: .solo,
+            humanSide: .black,
+            engineStrength: StockfishStrength(elo: 1_600),
+            engineName: "Stockfish 18"
+        )
+
+        library.upsert(record)
+
+        XCTAssertEqual(library.resumableGame, record)
+    }
+
     func testMonitoredTransportBroadcastsDisconnectWithoutHidingItFromClientStream() async {
         let underlying = TestEasyLinkTransport()
         let monitored = MonitoredEasyLinkTransport(wrapping: underlying)
@@ -583,6 +680,13 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(recovered.version, "Stockfish 18")
         XCTAssertFalse(recovered.bestMove.isEmpty)
         XCTAssertGreaterThan(recovered.nodes, 0)
+
+        let limited = try await engine.analyze(
+            fen: startFEN,
+            strength: StockfishStrength(elo: StockfishStrength.minimumElo)
+        )
+        XCTAssertFalse(limited.bestMove.isEmpty)
+        XCTAssertGreaterThan(limited.nodes, 0)
     }
 
     func testStockfishCoachEvaluatesEveryDestinationOfLiftedE2Pawn() async throws {

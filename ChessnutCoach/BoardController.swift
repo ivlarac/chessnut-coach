@@ -3,6 +3,13 @@ import Combine
 import EasyLinkSwiftSDK
 import Foundation
 
+struct SoloEngineSuggestion: Equatable, Sendable {
+    let move: OTBExpectedMove
+    let evaluation: StockfishScore
+
+    var displayText: String { move.displayText }
+}
+
 @MainActor
 final class BoardController: ObservableObject {
     @Published private(set) var isConnected = false
@@ -24,6 +31,11 @@ final class BoardController: ObservableObject {
     @Published private(set) var isPromotionPending = false
     @Published private(set) var whitePlayerName = "Blancas"
     @Published private(set) var blackPlayerName = "Negras"
+    @Published private(set) var gameMode = GameMode.twoPlayer
+    @Published private(set) var humanSide: PlayerSide?
+    @Published private(set) var engineStrength: StockfishStrength?
+    @Published private(set) var engineSuggestion: SoloEngineSuggestion?
+    @Published private(set) var isEngineThinking = false
 
     @Published private(set) var assistanceSettings = AssistanceSettings()
     @Published private(set) var activeHintSummary = ""
@@ -31,6 +43,10 @@ final class BoardController: ObservableObject {
     var whiteAssistanceMode: AssistanceMode { assistanceSettings.white }
     var blackAssistanceMode: AssistanceMode { assistanceSettings.black }
     var currentGameID: UUID { gameSession.gameRecord.id }
+    var isSoloGame: Bool { gameMode == .solo }
+    var isEngineTurn: Bool {
+        gameMode == .solo && humanSide?.pieceColor != gameSession.sideToMove && !gameSession.isFinished
+    }
 
     private var client: EasyLinkClient?
     private var connectionTask: Task<Void, Never>?
@@ -42,6 +58,7 @@ final class BoardController: ObservableObject {
     private var ledTask: Task<Void, Never>?
     private var coachingTask: Task<Void, Never>?
     private var prewarmTask: Task<Void, Never>?
+    private var engineMoveTask: Task<Void, Never>?
     private var gameSession = OTBGameSession()
     private let stockfishCoach = StockfishMoveCoach()
     private weak var gameLibrary: GameLibrary?
@@ -52,6 +69,7 @@ final class BoardController: ObservableObject {
     private var shouldMaintainConnection = false
     private var lifecycle = ChessnutSessionLifecycle()
     private var assistanceGeneration = 0
+    private var engineMoveGeneration = 0
     private var physicalSnapshotRevision = 0
 
     // Chessnut can emit several physical snapshots while a hand is moving a
@@ -150,6 +168,7 @@ final class BoardController: ObservableObject {
         fenDebounceTask = nil
         ledTask?.cancel()
         ledTask = nil
+        cancelEngineMoveRequest(clearSuggestion: false)
         invalidateTransientAssistance(turnOffLEDs: false)
 
         guard let client else {
@@ -192,21 +211,45 @@ final class BoardController: ObservableObject {
         }
     }
 
-    func newGame() {
+    func newGame(configuration: NewGameConfiguration = NewGameConfiguration()) {
         invalidateTransientAssistance(turnOffLEDs: isConnected)
+        cancelEngineMoveRequest(clearSuggestion: true)
 
-        let white = normalizedPlayerName(whitePlayerName, fallback: "Blancas")
-        let black = normalizedPlayerName(blackPlayerName, fallback: "Negras")
-        if !gameSession.moves.isEmpty, !gameSession.isFinished {
-            gameSession.abort()
-            persistCurrentGameIfNeeded()
+        let engineName = "Stockfish 18"
+        let humanName = normalizedHumanName(
+            configuration.humanSide == .white ? whitePlayerName : blackPlayerName
+        )
+        let white = configuration.mode == .solo
+            ? (configuration.humanSide == .white ? humanName : engineName)
+            : normalizedNonEnginePlayerName(whitePlayerName, fallback: "Blancas")
+        let black = configuration.mode == .solo
+            ? (configuration.humanSide == .black ? humanName : engineName)
+            : normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
+        if !gameSession.isFinished,
+           (!gameSession.moves.isEmpty || gameSession.gameRecord.mode == .solo) {
+            if gameSession.moves.isEmpty {
+                gameLibrary?.delete(gameSession.gameRecord)
+            } else {
+                gameSession.abort()
+                persistCurrentGameIfNeeded()
+            }
         }
 
-        gameSession.reset(whitePlayer: white, blackPlayer: black)
+        gameSession.reset(
+            whitePlayer: white,
+            blackPlayer: black,
+            mode: configuration.mode,
+            humanSide: configuration.mode == .solo ? configuration.humanSide : nil,
+            engineStrength: configuration.mode == .solo ? configuration.strength : nil,
+            engineName: configuration.mode == .solo ? engineName : nil
+        )
         lastProcessedPlacement = ""
         activeHintSummary = ""
         publishGameState()
-        gameStatus = "Nueva partida. Coloca todas las piezas en la posición inicial."
+        gameStatus = configuration.mode == .solo
+            ? "Partida en solitario preparada. Coloca todas las piezas en la posición inicial."
+            : "Nueva partida. Coloca todas las piezas en la posición inicial."
+        persistCurrentGameIfNeeded()
 
         guard let client, !boardPlacement.isEmpty else { return }
         schedulePhysicalPlacement(boardPlacement, client: client, force: true)
@@ -225,12 +268,14 @@ final class BoardController: ObservableObject {
     }
 
     func setWhitePlayerName(_ name: String) {
+        guard !(gameMode == .solo && humanSide == .black) else { return }
         whitePlayerName = name
         gameSession.updatePlayers(white: name, black: blackPlayerName)
         persistCurrentGameIfNeeded()
     }
 
     func setBlackPlayerName(_ name: String) {
+        guard !(gameMode == .solo && humanSide == .white) else { return }
         blackPlayerName = name
         gameSession.updatePlayers(white: whitePlayerName, black: name)
         persistCurrentGameIfNeeded()
@@ -238,12 +283,15 @@ final class BoardController: ObservableObject {
 
     func resignCurrentSide() {
         guard !gameSession.isFinished else { return }
-        let resigningColor = gameSession.sideToMove
+        let resigningColor = gameMode == .solo
+            ? (humanSide?.pieceColor ?? gameSession.sideToMove)
+            : gameSession.sideToMove
         let result = gameSession.resign(color: resigningColor)
         publishGameState()
         persistCurrentGameIfNeeded()
         gameStatus = result.displayText
         turnOffAutomaticLEDs()
+        cancelEngineMoveRequest(clearSuggestion: true)
     }
 
     func agreeDraw() {
@@ -253,6 +301,7 @@ final class BoardController: ObservableObject {
         persistCurrentGameIfNeeded()
         gameStatus = result.displayText
         turnOffAutomaticLEDs()
+        cancelEngineMoveRequest(clearSuggestion: true)
     }
 
     func abortGame() {
@@ -262,14 +311,16 @@ final class BoardController: ObservableObject {
         persistCurrentGameIfNeeded()
         gameStatus = "Partida cancelada sin resultado."
         turnOffAutomaticLEDs()
+        cancelEngineMoveRequest(clearSuggestion: true)
     }
 
     func deleteArchivedGame(_ game: GameRecord) {
         if game.id == gameSession.gameRecord.id {
             invalidateTransientAssistance(turnOffLEDs: isConnected)
+            cancelEngineMoveRequest(clearSuggestion: true)
             gameSession.reset(
-                whitePlayer: normalizedPlayerName(whitePlayerName, fallback: "Blancas"),
-                blackPlayer: normalizedPlayerName(blackPlayerName, fallback: "Negras")
+                whitePlayer: normalizedNonEnginePlayerName(whitePlayerName, fallback: "Blancas"),
+                blackPlayer: normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
             )
             lastProcessedPlacement = ""
             publishGameState()
@@ -406,6 +457,7 @@ final class BoardController: ObservableObject {
         resumeValidationTask?.cancel()
         resumeValidationTask = nil
         invalidateTransientAssistance(turnOffLEDs: false)
+        cancelEngineMoveRequest(clearSuggestion: false)
         prepareForFreshPhysicalSnapshot()
         Task {
             await disconnectedClient.disconnect()
@@ -550,7 +602,23 @@ final class BoardController: ObservableObject {
 
         invalidateTransientAssistance(turnOffLEDs: false)
 
-        let event = gameSession.process(physicalPlacement: placement)
+        let wasEngineTurn = isEngineTurn
+        let physicalPlacement = placement.split(separator: " ").first.map(String.init) ?? placement
+        let event: OTBGameEvent
+        if wasEngineTurn,
+           engineSuggestion == nil,
+           physicalPlacement != gameSession.logicalPlacement {
+            event = .invalid("Espera a que Stockfish proponga su jugada antes de mover sus piezas.")
+        } else {
+            event = gameSession.process(
+                physicalPlacement: placement,
+                requiredMove: wasEngineTurn ? engineSuggestion?.move : nil
+            )
+        }
+
+        if case .moveCompleted = event, wasEngineTurn {
+            cancelEngineMoveRequest(clearSuggestion: true)
+        }
         publishGameState()
         if case .moveCompleted = event {
             persistCurrentGameIfNeeded()
@@ -565,16 +633,30 @@ final class BoardController: ObservableObject {
                 } else if gameSession.isPromotionPending {
                     gameStatus = "Promoción pendiente. Sustituye físicamente el peón por la pieza elegida."
                 } else {
-                    gameStatus = lastMove == nil
-                        ? "Tablero sincronizado. Levanta una pieza de las blancas para empezar."
-                        : "Movimiento registrado. Turno de \(sideToMoveLabel.lowercased())."
+                    if isEngineTurn {
+                        gameStatus = engineSuggestion.map {
+                            "Turno de Stockfish: ejecuta \($0.displayText) en el tablero."
+                        } ?? "Stockfish está calculando su jugada…"
+                    } else {
+                        gameStatus = lastMove == nil
+                            ? "Tablero sincronizado. Levanta una pieza de las blancas para empezar."
+                            : "Movimiento registrado. Turno de \(sideToMoveLabel.lowercased())."
+                    }
                 }
                 try await client.setLEDs(.allOff)
-                scheduleStockfishPrewarmIfNeeded()
+                if isEngineTurn {
+                    scheduleEngineMoveIfNeeded(client: client)
+                } else {
+                    scheduleStockfishPrewarmIfNeeded()
+                }
 
             case let .pieceLifted(source, legalTargets):
                 clearStockfishHints()
-                if legalTargets.isEmpty {
+                if wasEngineTurn, let suggestion = engineSuggestion {
+                    gameStatus = "Jugada de Stockfish: lleva \(suggestion.displayText)."
+                    activeHintSummary = "Origen fijo · destino intermitente"
+                    startEngineMoveLEDs(suggestion.move, client: client)
+                } else if legalTargets.isEmpty {
                     gameStatus = "\(source.notation) no tiene movimientos legales."
                     try await client.setLEDs(.allOff)
                 } else {
@@ -611,7 +693,11 @@ final class BoardController: ObservableObject {
                     gameStatus = "Registrado \(move.san) (\(move.coordinateNotation)). Turno de \(sideToMoveLabel.lowercased())."
                 }
                 try await client.setLEDs(.allOff)
-                scheduleStockfishPrewarmIfNeeded()
+                if isEngineTurn {
+                    scheduleEngineMoveIfNeeded(client: client)
+                } else {
+                    scheduleStockfishPrewarmIfNeeded()
+                }
 
             case let .promotionRequired(square, legalKinds):
                 clearStockfishHints()
@@ -621,7 +707,11 @@ final class BoardController: ObservableObject {
 
             case let .intermediate(message):
                 gameStatus = message
-                if !gameSession.legalTargets.isEmpty {
+                if wasEngineTurn, let suggestion = engineSuggestion {
+                    gameStatus = "Completa la jugada de Stockfish \(suggestion.displayText)."
+                    activeHintSummary = "Origen fijo · destino intermitente"
+                    startEngineMoveLEDs(suggestion.move, client: client)
+                } else if !gameSession.legalTargets.isEmpty {
                     let mode = assistanceSettings.mode(for: gameSession.sideToMove)
 
                     switch mode {
@@ -651,7 +741,12 @@ final class BoardController: ObservableObject {
             case let .invalid(message):
                 clearStockfishHints()
                 gameStatus = message
-                try await client.setLEDs(.allOff)
+                if wasEngineTurn, let suggestion = engineSuggestion {
+                    activeHintSummary = "Stockfish: \(suggestion.displayText)"
+                    startEngineMoveLEDs(suggestion.move, client: client)
+                } else {
+                    try await client.setLEDs(.allOff)
+                }
             }
         } catch {
             status = "Conexión BLE interrumpida: \(error.localizedDescription)"
@@ -663,7 +758,8 @@ final class BoardController: ObservableObject {
         guard let client,
               let source = gameSession.liftedSquare,
               !gameSession.legalTargets.isEmpty,
-              !gameSession.isFinished
+              !gameSession.isFinished,
+              !isEngineTurn
         else { return }
 
         invalidateTransientAssistance(turnOffLEDs: false)
@@ -699,6 +795,7 @@ final class BoardController: ObservableObject {
         prewarmTask = nil
 
         guard !gameSession.isFinished,
+              !isEngineTurn,
               gameSession.liftedSquare == nil,
               assistanceSettings.mode(for: gameSession.sideToMove) == .stockfishQuality
         else { return }
@@ -818,6 +915,87 @@ final class BoardController: ObservableObject {
         }
     }
 
+    private func scheduleEngineMoveIfNeeded(client: EasyLinkClient) {
+        guard isEngineTurn,
+              gameSession.isSynchronized,
+              engineMoveTask == nil
+        else { return }
+
+        if let suggestion = engineSuggestion {
+            activeHintSummary = "Stockfish: \(suggestion.displayText)"
+            gameStatus = "Turno de Stockfish: ejecuta \(suggestion.displayText) en el tablero."
+            startEngineMoveLEDs(suggestion.move, client: client)
+            return
+        }
+
+        engineMoveGeneration += 1
+        let generation = engineMoveGeneration
+        let fen = logicalFEN
+        let strength = gameSession.gameRecord.engineStrength ?? .full
+        isEngineThinking = true
+        gameStatus = "Stockfish está calculando su jugada (\(strength.displayText))…"
+
+        engineMoveTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.engineMoveGeneration == generation {
+                    self.engineMoveTask = nil
+                    self.isEngineThinking = false
+                }
+            }
+
+            do {
+                let analysis = try await StockfishEngine.shared.analyze(
+                    fen: fen,
+                    nodeLimit: 80_000,
+                    strength: strength
+                )
+                try Task.checkCancellation()
+                guard self.engineMoveGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.isEngineTurn,
+                      let expectedMove = OTBExpectedMove(uci: analysis.bestMove)
+                else { return }
+
+                let suggestion = SoloEngineSuggestion(
+                    move: expectedMove,
+                    evaluation: analysis.score
+                )
+                self.engineSuggestion = suggestion
+                self.gameStatus = "Turno de Stockfish: ejecuta \(suggestion.displayText) en el tablero."
+                self.activeHintSummary = "Stockfish: \(suggestion.displayText) · origen fijo · destino intermitente"
+                if self.client === client, self.isConnected {
+                    self.startEngineMoveLEDs(expectedMove, client: client)
+                }
+            } catch is CancellationError {
+                // A new game or completed engine move superseded this search.
+            } catch {
+                guard self.engineMoveGeneration == generation else { return }
+                self.gameStatus = "No se pudo obtener la jugada de Stockfish: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func startEngineMoveLEDs(_ move: OTBExpectedMove, client: EasyLinkClient) {
+        startLEDHints(
+            [
+                LEDHint(square: move.from, pattern: .steady),
+                LEDHint(square: move.to, pattern: .slowBlink),
+            ],
+            client: client
+        )
+    }
+
+    private func cancelEngineMoveRequest(clearSuggestion: Bool) {
+        engineMoveGeneration += 1
+        engineMoveTask?.cancel()
+        engineMoveTask = nil
+        isEngineThinking = false
+        if clearSuggestion {
+            engineSuggestion = nil
+        }
+    }
+
     private func hintSummary(_ hints: [LEDHint]) -> String {
         hints
             .map { "\($0.square.notation) \($0.pattern.displayText)" }
@@ -892,6 +1070,9 @@ final class BoardController: ObservableObject {
         isPromotionPending = gameSession.isPromotionPending
         whitePlayerName = gameSession.gameRecord.whitePlayer
         blackPlayerName = gameSession.gameRecord.blackPlayer
+        gameMode = gameSession.gameRecord.mode
+        humanSide = gameSession.gameRecord.humanSide
+        engineStrength = gameSession.gameRecord.engineStrength
     }
 
     private func formattedMoveHistory(_ moves: [GameMoveRecord]) -> [String] {
@@ -912,13 +1093,28 @@ final class BoardController: ObservableObject {
     }
 
     private func persistCurrentGameIfNeeded() {
-        guard !gameSession.moves.isEmpty else { return }
+        guard !gameSession.moves.isEmpty || gameSession.gameRecord.mode == .solo else { return }
         gameLibrary?.upsert(gameSession.gameRecord)
     }
 
-    private func normalizedPlayerName(_ value: String, fallback: String) -> String {
+    private func normalizedHumanName(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? fallback : trimmed
+        guard !trimmed.isEmpty,
+              !trimmed.localizedCaseInsensitiveContains("stockfish"),
+              trimmed.localizedCaseInsensitiveCompare("Blancas") != .orderedSame,
+              trimmed.localizedCaseInsensitiveCompare("Negras") != .orderedSame
+        else {
+            return "Jugador"
+        }
+        return trimmed
+    }
+
+    private func normalizedNonEnginePlayerName(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.localizedCaseInsensitiveContains("stockfish") else {
+            return fallback
+        }
+        return trimmed
     }
 
     private func turnOffAutomaticLEDs() {
