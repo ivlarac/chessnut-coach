@@ -51,6 +51,12 @@ actor StockfishEngine {
         self.defaultNodeLimit = defaultNodeLimit
     }
 
+    deinit {
+        if let handle {
+            CCStockfishDestroy(handle)
+        }
+    }
+
     func version() -> String {
         String(cString: CCStockfishVersion())
     }
