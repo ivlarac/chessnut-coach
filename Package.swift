@@ -23,7 +23,13 @@ let package = Package(
             exclude: [
                 "BoardController.swift",
                 "ChessnutCoachApp.swift",
-                "ContentView.swift"
+                "ContentView.swift",
+                "EngineDiagnosticController.swift",
+                "StockfishEngine.swift",
+                "StockfishBridge.h",
+                "StockfishBridge.mm",
+                "StockfishBuildConfig.h",
+                "ChessnutCoach-Bridging-Header.h"
             ],
             sources: [
                 "GameModels.swift",
