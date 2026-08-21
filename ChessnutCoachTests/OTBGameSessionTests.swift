@@ -1,6 +1,10 @@
 import ChessKit
 import XCTest
+#if SWIFT_PACKAGE
+@testable import ChessnutCoachGameCore
+#else
 @testable import ChessnutCoach
+#endif
 
 final class OTBGameSessionTests: XCTestCase {
     func testLiftedPawnShowsE3AndE4() {
