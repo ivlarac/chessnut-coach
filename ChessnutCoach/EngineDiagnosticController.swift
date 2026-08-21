@@ -15,7 +15,7 @@ final class EngineDiagnosticController: ObservableObject {
     @Published private(set) var nodes = "—"
     @Published private(set) var isAnalyzing = false
 
-    private let engine = StockfishEngine()
+    private let engine = StockfishEngine.shared
     private var analysisTask: Task<Void, Never>?
 
     func useStartingPosition() {

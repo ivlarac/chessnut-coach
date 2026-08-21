@@ -7,7 +7,7 @@ struct ContentView: View {
         case abort
     }
 
-    @StateObject private var board = BoardController()
+    @ObservedObject var board: BoardController
     @StateObject private var engineDiagnostic = EngineDiagnosticController()
     @State private var rankIndex = 0
     @State private var fileIndex = 0
@@ -103,7 +103,7 @@ struct ContentView: View {
                 }
             }
 
-            Text("La calidad de los LEDs sigue siendo simulada en esta fase. Stockfish se valida por separado y se conectará a estos patrones en la fase 5.")
+            Text("Calidad Stockfish: pérdida ≤50 cp = fijo/bueno; 51–200 cp = parpadeo lento/aceptable; >200 cp = parpadeo rápido/blunder. La comparación se hace contra la mejor jugada global de la posición.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -121,7 +121,7 @@ struct ContentView: View {
             Picker("Ayuda \(title.lowercased())", selection: selection) {
                 Text("No").tag(AssistanceMode.off)
                 Text("Legales").tag(AssistanceMode.legalMoves)
-                Text("Calidad").tag(AssistanceMode.simulatedQuality)
+                Text("Calidad").tag(AssistanceMode.stockfishQuality)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -172,7 +172,7 @@ struct ContentView: View {
             LabeledContent("Profundidad", value: engineDiagnostic.depth)
             LabeledContent("Nodos", value: engineDiagnostic.nodes)
 
-            Text("El análisis se ejecuta íntegramente en el iPhone. En esta fase sus resultados todavía no controlan los LEDs.")
+            Text("El mismo Stockfish 18 local se reutiliza para el diagnóstico y para valorar los destinos del Chessnut, evitando cargar dos motores NNUE en memoria.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -306,9 +306,9 @@ struct ContentView: View {
 
     private var notesSection: some View {
         Section("Estado del proyecto") {
-            Text("Fase 4: Stockfish 18 se ejecuta localmente y puede analizar una FEN devolviendo mejor movimiento, evaluación, profundidad y nodos.")
+            Text("Fase 5: Stockfish 18 clasifica en tiempo real los destinos legales de la pieza levantada y controla los patrones LED del Chessnut Air.")
 
-            Text("La ayuda del Chessnut continúa usando calidad simulada. La fase 5 utilizará las evaluaciones reales del motor para asignar fijo/lento/rápido a cada destino legal.")
+            Text("El motor precalcula la evaluación global al comenzar cada turno. Al levantar una pieza sólo analiza sus destinos, y descarta el resultado si la posición física cambia antes de terminar.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -348,5 +348,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(board: BoardController())
 }

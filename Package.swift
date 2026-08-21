@@ -25,6 +25,8 @@ let package = Package(
                 "ChessnutCoachApp.swift",
                 "ContentView.swift",
                 "EngineDiagnosticController.swift",
+                "Info.plist",
+                "MonitoredEasyLinkTransport.swift",
                 "StockfishEngine.swift",
                 "StockfishBridge.h",
                 "StockfishBridge.mm",

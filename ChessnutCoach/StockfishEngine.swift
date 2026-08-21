@@ -29,6 +29,43 @@ enum StockfishScore: Equatable, Sendable {
             return plies >= 0 ? "Tablebase: gana" : "Tablebase: pierde"
         }
     }
+
+    var inverted: StockfishScore {
+        switch self {
+        case let .centipawns(value): .centipawns(-value)
+        case let .mate(plies): .mate(-plies)
+        case let .tablebase(plies): .tablebase(-plies)
+        }
+    }
+
+    /// Common ordering scale used only for coaching comparisons. Centipawn
+    /// scores keep their natural units; forced mates/tablebase outcomes sit far
+    /// outside normal evaluation values so losing a forced result is classified
+    /// decisively while differences in mate distance remain small.
+    var coachingValue: Int {
+        switch self {
+        case let .centipawns(value):
+            return value
+        case let .mate(plies):
+            if plies >= 0 {
+                return 100_000 - min(abs(plies), 10_000)
+            }
+            return -100_000 + min(abs(plies), 10_000)
+        case let .tablebase(plies):
+            if plies >= 0 {
+                return 50_000 - min(abs(plies), 10_000)
+            }
+            return -50_000 + min(abs(plies), 10_000)
+        }
+    }
+
+    func centipawnLoss(comparedWith best: StockfishScore) -> Int? {
+        guard case let .centipawns(bestValue) = best,
+              case let .centipawns(candidateValue) = self
+        else { return nil }
+
+        return max(0, bestValue - candidateValue)
+    }
 }
 
 struct StockfishAnalysis: Equatable, Sendable {
@@ -41,6 +78,30 @@ struct StockfishAnalysis: Equatable, Sendable {
     var summary: String {
         "\(version) · \(bestMove) · \(score.displayText) · profundidad \(depth) · \(nodes) nodos"
     }
+}
+
+struct StockfishMoveHint: Equatable, Sendable {
+    let square: Square
+    let quality: MoveQuality
+    let moverScore: StockfishScore
+    let centipawnLoss: Int?
+
+    var ledHint: LEDHint {
+        LEDHint(square: square, pattern: quality.ledPattern)
+    }
+
+    var detailText: String {
+        if let centipawnLoss {
+            return "\(square.notation) \(quality.ledPattern.displayText)/\(quality.displayText) (−\(centipawnLoss) cp)"
+        }
+        return "\(square.notation) \(quality.ledPattern.displayText)/\(quality.displayText)"
+    }
+}
+
+struct StockfishCoachingResult: Equatable, Sendable {
+    let baseline: StockfishAnalysis
+    let hints: [StockfishMoveHint]
+    let analyzedNodes: UInt64
 }
 
 private final class StockfishNativeHandle: @unchecked Sendable {
@@ -56,6 +117,8 @@ private final class StockfishNativeHandle: @unchecked Sendable {
 }
 
 actor StockfishEngine {
+    static let shared = StockfishEngine()
+
     private var handle: StockfishNativeHandle?
 
     let defaultNodeLimit: UInt64
@@ -164,5 +227,146 @@ actor StockfishEngine {
         let nativeHandle = StockfishNativeHandle(created)
         handle = nativeHandle
         return nativeHandle.pointer
+    }
+}
+
+actor StockfishMoveCoach {
+    private static let promotionKinds: [Piece.Kind] = [.queen, .rook, .bishop, .knight]
+
+    private let engine: StockfishEngine
+    private let baselineNodeLimit: UInt64
+    private let candidateNodeLimit: UInt64
+    private let thresholds: MoveQualityThresholds
+
+    private var cachedBaselineFEN: String?
+    private var cachedBaseline: StockfishAnalysis?
+
+    init(
+        engine: StockfishEngine = .shared,
+        baselineNodeLimit: UInt64 = 40_000,
+        candidateNodeLimit: UInt64 = 12_000,
+        thresholds: MoveQualityThresholds = MoveQualityThresholds()
+    ) {
+        self.engine = engine
+        self.baselineNodeLimit = baselineNodeLimit
+        self.candidateNodeLimit = candidateNodeLimit
+        self.thresholds = thresholds
+    }
+
+    func prepare(fen: String) async {
+        _ = try? await baseline(for: fen)
+    }
+
+    func evaluate(
+        fen: String,
+        source: Square,
+        legalTargets: [Square]
+    ) async throws -> StockfishCoachingResult {
+        guard !legalTargets.isEmpty else {
+            throw StockfishEngineError.search("La pieza levantada no tiene destinos legales que analizar.")
+        }
+
+        let baseline = try await baseline(for: fen)
+        var hints: [StockfishMoveHint] = []
+        var analyzedNodes = baseline.nodes
+
+        for target in legalTargets.sorted(by: { $0.notation < $1.notation }) {
+            try Task.checkCancellation()
+
+            let candidateFENs = try resultingFENs(
+                from: fen,
+                source: source,
+                target: target
+            )
+
+            var bestMoverScore: StockfishScore?
+
+            for candidateFEN in candidateFENs {
+                try Task.checkCancellation()
+                let analysis = try await engine.analyze(
+                    fen: candidateFEN,
+                    nodeLimit: candidateNodeLimit
+                )
+                analyzedNodes += analysis.nodes
+
+                // After the candidate move, Stockfish evaluates from the
+                // opponent's side-to-move. Invert it back to the player who
+                // lifted the piece so every score shares the baseline POV.
+                let moverScore = analysis.score.inverted
+                if bestMoverScore == nil || moverScore.coachingValue > bestMoverScore!.coachingValue {
+                    bestMoverScore = moverScore
+                }
+            }
+
+            guard let moverScore = bestMoverScore else {
+                throw StockfishEngineError.search("No se pudo evaluar el destino \(target.notation).")
+            }
+
+            let coachingLoss = max(0, baseline.score.coachingValue - moverScore.coachingValue)
+            let quality = thresholds.classify(loss: coachingLoss)
+            let exactCentipawnLoss = moverScore.centipawnLoss(comparedWith: baseline.score)
+
+            hints.append(
+                StockfishMoveHint(
+                    square: target,
+                    quality: quality,
+                    moverScore: moverScore,
+                    centipawnLoss: exactCentipawnLoss
+                )
+            )
+        }
+
+        return StockfishCoachingResult(
+            baseline: baseline,
+            hints: hints,
+            analyzedNodes: analyzedNodes
+        )
+    }
+
+    private func baseline(for fen: String) async throws -> StockfishAnalysis {
+        if cachedBaselineFEN == fen, let cachedBaseline {
+            return cachedBaseline
+        }
+
+        let analysis = try await engine.analyze(fen: fen, nodeLimit: baselineNodeLimit)
+        cachedBaselineFEN = fen
+        cachedBaseline = analysis
+        return analysis
+    }
+
+    private func resultingFENs(
+        from fen: String,
+        source: Square,
+        target: Square
+    ) throws -> [String] {
+        guard let position = Position(fen: fen) else {
+            throw StockfishEngineError.search("No se pudo reconstruir la posición lógica para el coaching.")
+        }
+
+        var board = Board(position: position)
+        guard board.move(pieceAt: source, to: target) != nil else {
+            throw StockfishEngineError.search("Stockfish recibió un destino que ChessKit ya no considera legal.")
+        }
+
+        guard case .promotion = board.state else {
+            return [board.position.fen]
+        }
+
+        var promotionFENs: [String] = []
+        for kind in Self.promotionKinds {
+            var promotedBoard = Board(position: position)
+            guard promotedBoard.move(pieceAt: source, to: target) != nil,
+                  case let .promotion(promotionMove) = promotedBoard.state
+            else { continue }
+
+            _ = promotedBoard.completePromotion(of: promotionMove, to: kind)
+            promotionFENs.append(promotedBoard.position.fen)
+        }
+
+        guard !promotionFENs.isEmpty else {
+            throw StockfishEngineError.search("No se pudieron generar las variantes de promoción para \(target.notation).")
+        }
+
+        return promotionFENs
     }
 }
