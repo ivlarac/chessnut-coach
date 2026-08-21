@@ -182,6 +182,70 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertTrue(agreement.isFinished)
     }
 
+    func testAssistanceSettingsAreIndependentByColor() {
+        var settings = AssistanceSettings(white: .simulatedQuality, black: .off)
+
+        XCTAssertEqual(settings.mode(for: .white), .simulatedQuality)
+        XCTAssertEqual(settings.mode(for: .black), .off)
+
+        settings.black = .legalMoves
+
+        XCTAssertEqual(settings.mode(for: .white), .simulatedQuality)
+        XCTAssertEqual(settings.mode(for: .black), .legalMoves)
+    }
+
+    func testLegalMoveAssistanceUsesOnlySteadyLEDs() {
+        let hints = AssistanceHintPlanner.hints(
+            for: [.e4, .e3],
+            mode: .legalMoves
+        )
+
+        XCTAssertEqual(hints.map { $0.square.notation }, ["e3", "e4"])
+        XCTAssertTrue(hints.allSatisfy { $0.pattern == .steady })
+    }
+
+    func testSimulatedQualityProducesSteadySlowAndFastPatterns() {
+        let hints = AssistanceHintPlanner.hints(
+            for: [.d4, .a1, .h8, .c3],
+            mode: .simulatedQuality
+        )
+
+        XCTAssertEqual(hints.first?.square, .a1)
+        XCTAssertEqual(hints.first?.pattern, .steady)
+        XCTAssertEqual(hints.last?.square, .h8)
+        XCTAssertEqual(hints.last?.pattern, .fastBlink)
+        XCTAssertTrue(hints.dropFirst().dropLast().allSatisfy { $0.pattern == .slowBlink })
+    }
+
+    func testLEDFrameComposerKeepsSteadyWhileBlinkPatternsChange() {
+        let hints = [
+            LEDHint(square: .a1, pattern: .steady),
+            LEDHint(square: .b1, pattern: .slowBlink),
+            LEDHint(square: .c1, pattern: .fastBlink),
+        ]
+
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 0).map(\.notation),
+            ["a1", "b1", "c1"]
+        )
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 1).map(\.notation),
+            ["a1", "b1"]
+        )
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 3).map(\.notation),
+            ["a1"]
+        )
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 4).map(\.notation),
+            ["a1", "c1"]
+        )
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 6).map(\.notation),
+            ["a1", "b1", "c1"]
+        )
+    }
+
     @discardableResult
     private func apply(
         _ from: Square,

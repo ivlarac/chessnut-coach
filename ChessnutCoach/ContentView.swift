@@ -17,6 +17,7 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 connectionSection
+                assistanceSection
                 gameSection
                 historySection
                 positionSection
@@ -74,6 +75,61 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private var assistanceSection: some View {
+        Section("Ayuda por bando") {
+            assistancePicker(
+                title: "Blancas",
+                mode: board.whiteAssistanceMode,
+                selection: whiteAssistanceBinding
+            )
+
+            assistancePicker(
+                title: "Negras",
+                mode: board.blackAssistanceMode,
+                selection: blackAssistanceBinding
+            )
+
+            if !board.activeHintSummary.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Patrón activo")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(board.activeHintSummary)
+                        .font(.system(.footnote, design: .monospaced))
+                }
+            }
+
+            Text("La calidad todavía es simulada y determinista. No hay Stockfish en esta fase: sirve para validar la interfaz y los tres patrones LED antes de conectar el motor.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func assistancePicker(
+        title: String,
+        mode: AssistanceMode,
+        selection: Binding<AssistanceMode>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+
+            Picker("Ayuda \(title.lowercased())", selection: selection) {
+                Text("No").tag(AssistanceMode.off)
+                Text("Legales").tag(AssistanceMode.legalMoves)
+                Text("Calidad").tag(AssistanceMode.simulatedQuality)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("Ayuda para \(title.lowercased())")
+
+            Text(mode.detailText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
     }
 
     private var gameSection: some View {
@@ -182,10 +238,19 @@ struct ContentView: View {
             }
             .disabled(!board.isConnected)
 
+            Button("Probar fijo + lento + rápido") {
+                board.demoLEDPatterns()
+            }
+            .disabled(!board.isConnected)
+
             Button("Apagar todos los LEDs") {
                 board.ledsOff()
             }
             .disabled(!board.isConnected)
+
+            Text("Prueba simultánea: a1 fijo, b1 parpadeo lento y c1 parpadeo rápido. El controlador compone un único frame para el Chessnut cada 250 ms.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
 
             Text("Mapeo confirmado en Chessnut Air: (0,0)=a8, (0,7)=h8, (7,0)=a1 y (7,7)=h1.")
                 .font(.footnote)
@@ -195,12 +260,26 @@ struct ContentView: View {
 
     private var notesSection: some View {
         Section("Estado del proyecto") {
-            Text("La sesión mantiene ahora el historial completo, estado y resultado de la partida. Capturas, enroque y en passant siguen validándose contra la posición física final.")
+            Text("Fase 3: la ayuda puede configurarse de forma independiente para blancas y negras. Los destinos pueden mostrarse fijos o con calidad simulada mediante tres patrones temporales.")
 
-            Text("Las promociones se completan al sustituir físicamente el peón por dama, torre, alfil o caballo. La persistencia de partidas y la exportación PGN llegarán en una fase posterior.")
+            Text("Stockfish todavía no está integrado. La siguiente fase añadirá el motor local; después sustituiremos la clasificación simulada por evaluación real de cada destino.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var whiteAssistanceBinding: Binding<AssistanceMode> {
+        Binding(
+            get: { board.whiteAssistanceMode },
+            set: { board.setWhiteAssistanceMode($0) }
+        )
+    }
+
+    private var blackAssistanceBinding: Binding<AssistanceMode> {
+        Binding(
+            get: { board.blackAssistanceMode },
+            set: { board.setBlackAssistanceMode($0) }
+        )
     }
 
     private var finishDialogTitle: String {
