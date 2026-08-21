@@ -43,19 +43,25 @@ struct StockfishAnalysis: Equatable, Sendable {
     }
 }
 
+private final class StockfishNativeHandle: @unchecked Sendable {
+    let pointer: OpaquePointer
+
+    init(_ pointer: OpaquePointer) {
+        self.pointer = pointer
+    }
+
+    deinit {
+        CCStockfishDestroy(pointer)
+    }
+}
+
 actor StockfishEngine {
-    private var handle: OpaquePointer?
+    private var handle: StockfishNativeHandle?
 
     let defaultNodeLimit: UInt64
 
     init(defaultNodeLimit: UInt64 = 60_000) {
         self.defaultNodeLimit = defaultNodeLimit
-    }
-
-    deinit {
-        if let handle {
-            CCStockfishDestroy(handle)
-        }
     }
 
     func version() -> String {
@@ -125,13 +131,13 @@ actor StockfishEngine {
 
     func stop() {
         if let handle {
-            CCStockfishStop(handle)
+            CCStockfishStop(handle.pointer)
         }
     }
 
     private func ensureEngine() throws -> OpaquePointer {
         if let handle {
-            return handle
+            return handle.pointer
         }
 
         guard let resourcePath = Bundle.main.resourceURL?.path else {
@@ -155,7 +161,8 @@ actor StockfishEngine {
             throw StockfishEngineError.initialization(String(cString: error))
         }
 
-        handle = created
-        return created
+        let nativeHandle = StockfishNativeHandle(created)
+        handle = nativeHandle
+        return nativeHandle.pointer
     }
 }
