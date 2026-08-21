@@ -79,24 +79,17 @@ struct ContentView: View {
 
     private var assistanceSection: some View {
         Section("Ayuda por bando") {
-            Picker("Blancas", selection: whiteAssistanceBinding) {
-                ForEach(AssistanceMode.allCases) { mode in
-                    Text(mode.displayText).tag(mode)
-                }
-            }
+            assistancePicker(
+                title: "Blancas",
+                mode: board.whiteAssistanceMode,
+                selection: whiteAssistanceBinding
+            )
 
-            Picker("Negras", selection: blackAssistanceBinding) {
-                ForEach(AssistanceMode.allCases) { mode in
-                    Text(mode.displayText).tag(mode)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Blancas: \(board.whiteAssistanceMode.detailText)")
-                Text("Negras: \(board.blackAssistanceMode.detailText)")
-            }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
+            assistancePicker(
+                title: "Negras",
+                mode: board.blackAssistanceMode,
+                selection: blackAssistanceBinding
+            )
 
             if !board.activeHintSummary.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
@@ -112,6 +105,31 @@ struct ContentView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func assistancePicker(
+        title: String,
+        mode: AssistanceMode,
+        selection: Binding<AssistanceMode>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+
+            Picker("Ayuda \(title.lowercased())", selection: selection) {
+                Text("No").tag(AssistanceMode.off)
+                Text("Legales").tag(AssistanceMode.legalMoves)
+                Text("Calidad").tag(AssistanceMode.simulatedQuality)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("Ayuda para \(title.lowercased())")
+
+            Text(mode.detailText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
     }
 
     private var gameSection: some View {
