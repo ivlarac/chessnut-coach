@@ -7,7 +7,7 @@ struct ContentView: View {
         case abort
     }
 
-    @StateObject private var board = BoardController()
+    @ObservedObject var board: BoardController
     @StateObject private var engineDiagnostic = EngineDiagnosticController()
     @State private var rankIndex = 0
     @State private var fileIndex = 0
@@ -348,5 +348,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(board: BoardController())
 }

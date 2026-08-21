@@ -31,6 +31,9 @@ final class BoardController: ObservableObject {
 
     private var client: EasyLinkClient?
     private var connectionTask: Task<Void, Never>?
+    private var reconnectionTask: Task<Void, Never>?
+    private var disconnectionTask: Task<Void, Never>?
+    private var resumeValidationTask: Task<Void, Never>?
     private var fenTask: Task<Void, Never>?
     private var fenDebounceTask: Task<Void, Never>?
     private var ledTask: Task<Void, Never>?
@@ -42,6 +45,10 @@ final class BoardController: ObservableObject {
     private var currentStockfishHints: [StockfishMoveHint] = []
     private var currentStockfishHintFEN: String?
     private var currentStockfishHintSource: Square?
+    private var shouldMaintainConnection = false
+    private var lifecycle = ChessnutSessionLifecycle()
+    private var assistanceGeneration = 0
+    private var physicalSnapshotRevision = 0
 
     // Chessnut can emit several physical snapshots while a hand is moving a
     // piece. Never let LED writes block consumption of that realtime stream:
@@ -50,60 +57,84 @@ final class BoardController: ObservableObject {
     private var lastProcessedPlacement = ""
     private let fenSettleDelay: Duration = .milliseconds(100)
     private let ledTickDelay: Duration = .milliseconds(250)
+    private let reconnectDelay: Duration = .seconds(2)
+    private let resumeSnapshotDelay: Duration = .milliseconds(500)
 
     private var logicalFEN: String {
         gameSession.board.position.fen
     }
 
     func connect() {
-        guard connectionTask == nil, !isConnected else { return }
+        shouldMaintainConnection = true
+        startConnection(isReconnect: false)
+    }
 
-        status = "Buscando Chessnut Air…"
+    private func startConnection(isReconnect: Bool) {
+        guard shouldMaintainConnection,
+              connectionTask == nil,
+              !isConnected
+        else { return }
+
+        reconnectionTask?.cancel()
+        reconnectionTask = nil
+        status = isReconnect ? "Reconectando Chessnut Air…" : "Buscando Chessnut Air…"
 
         connectionTask = Task { [weak self] in
             guard let self else { return }
 
-            let client = EasyLinkClient(profile: .classic)
+            let transport = MonitoredEasyLinkTransport(profile: .classic)
+            let client = EasyLinkClient(profile: .classic, transport: transport)
 
             do {
                 try await client.connect()
                 try await client.enableRealtimeUpdates()
 
-                guard !Task.isCancelled else {
+                guard !Task.isCancelled, self.shouldMaintainConnection else {
                     await client.disconnect()
                     return
                 }
 
                 self.client = client
                 self.isConnected = true
-                self.status = "Conectado"
+                self.status = isReconnect
+                    ? "Reconectado · validando posición del tablero…"
+                    : "Conectado · esperando posición del tablero…"
+                self.prepareForFreshPhysicalSnapshot()
+                self.startDisconnectionStream(transport: transport, client: client)
                 self.startFENStream(client: client)
             } catch {
                 await client.disconnect()
+                guard !Task.isCancelled else { return }
                 self.client = nil
                 self.isConnected = false
-                self.status = "Error: \(error.localizedDescription)"
+                self.status = "Conexión perdida · nuevo intento en breve"
             }
 
             self.connectionTask = nil
+
+            if !self.isConnected, self.shouldMaintainConnection {
+                self.scheduleReconnect()
+            }
         }
     }
 
     func disconnect() {
+        shouldMaintainConnection = false
         connectionTask?.cancel()
         connectionTask = nil
+        reconnectionTask?.cancel()
+        reconnectionTask = nil
+        disconnectionTask?.cancel()
+        disconnectionTask = nil
+        resumeValidationTask?.cancel()
+        resumeValidationTask = nil
         fenTask?.cancel()
         fenTask = nil
         fenDebounceTask?.cancel()
         fenDebounceTask = nil
         ledTask?.cancel()
         ledTask = nil
-        coachingTask?.cancel()
-        coachingTask = nil
-        prewarmTask?.cancel()
-        prewarmTask = nil
-        clearStockfishHints()
-        activeHintSummary = ""
+        invalidateTransientAssistance(turnOffLEDs: false)
 
         guard let client else {
             resetConnectionState()
@@ -119,6 +150,24 @@ final class BoardController: ObservableObject {
         }
     }
 
+    func handleAppPhase(_ phase: ChessnutAppPhase) {
+        let directive = lifecycle.transition(to: phase)
+
+        if directive.invalidateTransientAssistance {
+            invalidateTransientAssistance(turnOffLEDs: isConnected)
+        }
+
+        if directive.probeConnection, shouldMaintainConnection {
+            if isConnected {
+                probeConnectionAndRequestFreshSnapshot(
+                    shouldRequestSnapshot: directive.requestFreshBoardSnapshot
+                )
+            } else {
+                scheduleReconnect(immediately: true)
+            }
+        }
+    }
+
     func refreshBattery() {
         guard let client else { return }
 
@@ -128,11 +177,7 @@ final class BoardController: ObservableObject {
     }
 
     func newGame() {
-        coachingTask?.cancel()
-        coachingTask = nil
-        prewarmTask?.cancel()
-        prewarmTask = nil
-        clearStockfishHints()
+        invalidateTransientAssistance(turnOffLEDs: isConnected)
         gameSession.reset()
         lastProcessedPlacement = ""
         activeHintSummary = ""
@@ -191,8 +236,7 @@ final class BoardController: ObservableObject {
         guard let client else { return }
         guard (0..<8).contains(rankIndex), (0..<8).contains(fileIndex) else { return }
 
-        ledTask?.cancel()
-        activeHintSummary = ""
+        invalidateTransientAssistance(turnOffLEDs: false)
         ledTask = Task { [weak self] in
             var leds = LEDBoard.allOff
             leds[rankIndex: rankIndex, fileIndex: fileIndex] = .red
@@ -205,6 +249,7 @@ final class BoardController: ObservableObject {
                 // Another board event took priority over the manual test.
             } catch {
                 self?.status = "Error LEDs: \(error.localizedDescription)"
+                self?.handleClientFailure(error, client: client)
             }
         }
     }
@@ -213,8 +258,7 @@ final class BoardController: ObservableObject {
         guard let client else { return }
         guard (0..<8).contains(rankIndex), (0..<8).contains(fileIndex) else { return }
 
-        ledTask?.cancel()
-        activeHintSummary = ""
+        invalidateTransientAssistance(turnOffLEDs: false)
         ledTask = Task { [weak self] in
             var leds = LEDBoard.allOff
             leds[rankIndex: rankIndex, fileIndex: fileIndex] = .red
@@ -234,12 +278,15 @@ final class BoardController: ObservableObject {
                 // A newer LED request owns the board now.
             } catch {
                 self?.status = "Error parpadeo: \(error.localizedDescription)"
+                self?.handleClientFailure(error, client: client)
             }
         }
     }
 
     func demoLEDPatterns() {
         guard let client else { return }
+
+        invalidateTransientAssistance(turnOffLEDs: false)
 
         let hints = [
             LEDHint(square: .a1, pattern: .steady),
@@ -255,14 +302,144 @@ final class BoardController: ObservableObject {
     func ledsOff() {
         guard let client else { return }
 
-        ledTask?.cancel()
-        activeHintSummary = ""
+        invalidateTransientAssistance(turnOffLEDs: false)
         ledTask = Task { [weak self] in
             do {
                 try await client.setLEDs(.allOff)
                 self?.status = "LEDs apagados"
             } catch {
                 self?.status = "Error LEDs: \(error.localizedDescription)"
+                self?.handleClientFailure(error, client: client)
+            }
+        }
+    }
+
+    private func startDisconnectionStream(
+        transport: MonitoredEasyLinkTransport,
+        client: EasyLinkClient
+    ) {
+        disconnectionTask?.cancel()
+        disconnectionTask = Task { [weak self] in
+            for await event in transport.connectionEvents {
+                guard !Task.isCancelled else { return }
+
+                switch event {
+                case .disconnected:
+                    self?.handleUnexpectedDisconnect(client: client)
+                    return
+                }
+            }
+        }
+    }
+
+    private func handleUnexpectedDisconnect(client disconnectedClient: EasyLinkClient) {
+        guard shouldMaintainConnection,
+              let client,
+              client === disconnectedClient
+        else { return }
+
+        self.client = nil
+        isConnected = false
+        batteryPercentage = nil
+        status = "Chessnut desconectado · reconectando…"
+
+        disconnectionTask?.cancel()
+        disconnectionTask = nil
+        fenTask?.cancel()
+        fenTask = nil
+        fenDebounceTask?.cancel()
+        fenDebounceTask = nil
+        resumeValidationTask?.cancel()
+        resumeValidationTask = nil
+        invalidateTransientAssistance(turnOffLEDs: false)
+        prepareForFreshPhysicalSnapshot()
+        Task {
+            await disconnectedClient.disconnect()
+        }
+        scheduleReconnect()
+    }
+
+    private func handleClientFailure(_ error: Error, client failedClient: EasyLinkClient) {
+        guard !(error is CancellationError),
+              let client,
+              client === failedClient
+        else { return }
+
+        handleUnexpectedDisconnect(client: failedClient)
+    }
+
+    private func scheduleReconnect(immediately: Bool = false) {
+        guard shouldMaintainConnection,
+              !isConnected,
+              connectionTask == nil,
+              reconnectionTask == nil
+        else { return }
+
+        reconnectionTask = Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                if !immediately {
+                    try await Task.sleep(for: self.reconnectDelay)
+                }
+                try Task.checkCancellation()
+                self.reconnectionTask = nil
+                self.startConnection(isReconnect: true)
+            } catch is CancellationError {
+                // A manual disconnect or a newer connection attempt won.
+            } catch {
+                self.reconnectionTask = nil
+            }
+        }
+    }
+
+    private func prepareForFreshPhysicalSnapshot() {
+        boardPlacement = ""
+        latestPhysicalPlacement = ""
+        lastProcessedPlacement = ""
+        isBoardSynchronized = false
+        activeHintSummary = ""
+        gameStatus = "Conexión activa. Esperando la posición actual del Chessnut para recuperar la partida."
+    }
+
+    private func probeConnectionAndRequestFreshSnapshot(shouldRequestSnapshot: Bool) {
+        guard let client else { return }
+
+        resumeValidationTask?.cancel()
+        let startingRevision = physicalSnapshotRevision
+
+        resumeValidationTask = Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let battery = try await client.batteryStatus(timeout: .seconds(3))
+                try Task.checkCancellation()
+                guard self.client === client else { return }
+                self.batteryPercentage = battery.percentage
+
+                if shouldRequestSnapshot {
+                    try await client.enableRealtimeUpdates()
+                    try await Task.sleep(for: self.resumeSnapshotDelay)
+                    try Task.checkCancellation()
+                    guard self.client === client else { return }
+
+                    if self.physicalSnapshotRevision > startingRevision,
+                       !self.latestPhysicalPlacement.isEmpty {
+                        self.schedulePhysicalPlacement(
+                            self.latestPhysicalPlacement,
+                            client: client,
+                            force: true
+                        )
+                    } else {
+                        self.isBoardSynchronized = false
+                        self.status = "Conectado · esperando posición actual del tablero…"
+                        self.gameStatus = "Mueve o levanta una pieza para validar la posición física tras volver a la app."
+                    }
+                }
+            } catch is CancellationError {
+                // A newer lifecycle transition superseded this validation.
+            } catch {
+                self.handleClientFailure(error, client: client)
             }
         }
     }
@@ -279,6 +456,7 @@ final class BoardController: ObservableObject {
 
     private func receivePhysicalPlacement(_ placement: String, client: EasyLinkClient) {
         boardPlacement = placement
+        physicalSnapshotRevision += 1
 
         guard placement != latestPhysicalPlacement else { return }
 
@@ -316,11 +494,7 @@ final class BoardController: ObservableObject {
 
         lastProcessedPlacement = placement
 
-        coachingTask?.cancel()
-        coachingTask = nil
-        ledTask?.cancel()
-        ledTask = nil
-        activeHintSummary = ""
+        invalidateTransientAssistance(turnOffLEDs: false)
 
         let event = gameSession.process(physicalPlacement: placement)
         publishGameState()
@@ -423,7 +597,8 @@ final class BoardController: ObservableObject {
                 try await client.setLEDs(.allOff)
             }
         } catch {
-            status = "Conectado · error LEDs: \(error.localizedDescription)"
+            status = "Conexión BLE interrumpida: \(error.localizedDescription)"
+            handleClientFailure(error, client: client)
         }
     }
 
@@ -434,18 +609,17 @@ final class BoardController: ObservableObject {
               !gameSession.isFinished
         else { return }
 
-        coachingTask?.cancel()
-        coachingTask = nil
-        ledTask?.cancel()
-        ledTask = nil
-        clearStockfishHints()
-        activeHintSummary = ""
+        invalidateTransientAssistance(turnOffLEDs: false)
 
         let mode = assistanceSettings.mode(for: gameSession.sideToMove)
         switch mode {
         case .off:
-            Task {
-                try? await client.setLEDs(.allOff)
+            Task { [weak self] in
+                do {
+                    try await client.setLEDs(.allOff)
+                } catch {
+                    self?.handleClientFailure(error, client: client)
+                }
             }
 
         case .legalMoves:
@@ -489,6 +663,7 @@ final class BoardController: ObservableObject {
 
         let fen = logicalFEN
         let coach = stockfishCoach
+        let generation = assistanceGeneration
 
         coachingTask = Task { [weak self] in
             do {
@@ -499,7 +674,8 @@ final class BoardController: ObservableObject {
                 )
                 try Task.checkCancellation()
                 guard let self else { return }
-                guard self.logicalFEN == fen,
+                guard self.assistanceGeneration == generation,
+                      self.logicalFEN == fen,
                       self.gameSession.liftedSquare == source,
                       self.assistanceSettings.mode(for: self.gameSession.sideToMove) == .stockfishQuality,
                       self.isConnected
@@ -515,18 +691,26 @@ final class BoardController: ObservableObject {
                 // The piece was returned/moved or a newer assistance request won.
             } catch {
                 guard let self, !Task.isCancelled else { return }
-                guard self.logicalFEN == fen, self.gameSession.liftedSquare == source else { return }
+                guard self.assistanceGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.gameSession.liftedSquare == source
+                else { return }
 
                 self.clearStockfishHints()
                 self.activeHintSummary = ""
                 self.gameStatus = "No se pudo analizar \(source.notation) con Stockfish 18: \(error.localizedDescription)"
-                try? await client.setLEDs(.allOff)
+                do {
+                    try await client.setLEDs(.allOff)
+                } catch {
+                    self.handleClientFailure(error, client: client)
+                }
             }
         }
     }
 
     private func startLEDHints(_ hints: [LEDHint], client: EasyLinkClient) {
         ledTask?.cancel()
+        let generation = assistanceGeneration
 
         guard !hints.isEmpty else {
             activeHintSummary = ""
@@ -540,11 +724,17 @@ final class BoardController: ObservableObject {
                 guard let self else { return }
 
                 do {
+                    guard self.assistanceGeneration == generation else { return }
                     try await client.setLEDs(self.ledBoard(for: hints.map(\.square)))
+                    guard self.assistanceGeneration == generation else {
+                        try await client.setLEDs(.allOff)
+                        return
+                    }
                 } catch is CancellationError {
                     // A newer LED request owns the board now.
                 } catch {
                     self.status = "Conectado · error LEDs: \(error.localizedDescription)"
+                    self.handleClientFailure(error, client: client)
                 }
             }
             return
@@ -556,6 +746,7 @@ final class BoardController: ObservableObject {
 
             do {
                 while !Task.isCancelled {
+                    guard self.assistanceGeneration == generation else { return }
                     let activeSquares = LEDHintFrameComposer.activeSquares(for: hints, tick: tick)
                     try await client.setLEDs(self.ledBoard(for: activeSquares))
                     tick += 1
@@ -565,6 +756,7 @@ final class BoardController: ObservableObject {
                 // The next board state or LED request takes ownership immediately.
             } catch {
                 self.status = "Conectado · error patrones LED: \(error.localizedDescription)"
+                self.handleClientFailure(error, client: client)
             }
         }
     }
@@ -583,6 +775,38 @@ final class BoardController: ObservableObject {
         currentStockfishHints = []
         currentStockfishHintFEN = nil
         currentStockfishHintSource = nil
+    }
+
+    private func invalidateTransientAssistance(turnOffLEDs: Bool) {
+        assistanceGeneration += 1
+        coachingTask?.cancel()
+        coachingTask = nil
+        prewarmTask?.cancel()
+        prewarmTask = nil
+        ledTask?.cancel()
+        ledTask = nil
+        clearStockfishHints()
+        activeHintSummary = ""
+
+        guard turnOffLEDs, let client else { return }
+        let generation = assistanceGeneration
+
+        Task { [weak self] in
+            guard let self,
+                  self.assistanceGeneration == generation,
+                  self.client === client
+            else { return }
+
+            do {
+                try await client.setLEDs(.allOff)
+                guard self.assistanceGeneration == generation else {
+                    self.refreshCurrentAssistanceIfNeeded()
+                    return
+                }
+            } catch {
+                self.handleClientFailure(error, client: client)
+            }
+        }
     }
 
     private func ledBoard(for squares: [Square]) -> LEDBoard {
@@ -629,17 +853,7 @@ final class BoardController: ObservableObject {
     }
 
     private func turnOffAutomaticLEDs() {
-        coachingTask?.cancel()
-        coachingTask = nil
-        prewarmTask?.cancel()
-        prewarmTask = nil
-        clearStockfishHints()
-        activeHintSummary = ""
-        guard let client else { return }
-        ledTask?.cancel()
-        ledTask = Task {
-            try? await client.setLEDs(.allOff)
-        }
+        invalidateTransientAssistance(turnOffLEDs: isConnected)
     }
 
     private func refreshBattery(using client: EasyLinkClient) async {
@@ -658,6 +872,7 @@ final class BoardController: ObservableObject {
         batteryPercentage = nil
         latestPhysicalPlacement = ""
         lastProcessedPlacement = ""
+        physicalSnapshotRevision = 0
         isBoardSynchronized = false
         clearStockfishHints()
         activeHintSummary = ""

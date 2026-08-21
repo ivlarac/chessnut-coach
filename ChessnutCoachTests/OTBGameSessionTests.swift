@@ -3,6 +3,7 @@ import XCTest
 #if SWIFT_PACKAGE
 @testable import ChessnutCoachGameCore
 #else
+import EasyLinkSwiftSDK
 @testable import ChessnutCoach
 #endif
 
@@ -227,6 +228,24 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(MoveQuality.blunder.ledPattern, .fastBlink)
     }
 
+    func testLifecycleInvalidatesTransientWorkOnlyAtBackgroundAndResumeBoundaries() {
+        var lifecycle = ChessnutSessionLifecycle()
+
+        XCTAssertEqual(lifecycle.transition(to: .active), .none)
+        XCTAssertEqual(lifecycle.transition(to: .inactive), .none)
+
+        let background = lifecycle.transition(to: .background)
+        XCTAssertTrue(background.invalidateTransientAssistance)
+        XCTAssertFalse(background.requestFreshBoardSnapshot)
+        XCTAssertFalse(background.probeConnection)
+
+        let active = lifecycle.transition(to: .active)
+        XCTAssertTrue(active.invalidateTransientAssistance)
+        XCTAssertTrue(active.requestFreshBoardSnapshot)
+        XCTAssertTrue(active.probeConnection)
+        XCTAssertEqual(lifecycle.transition(to: .active), .none)
+    }
+
     func testLEDFrameComposerKeepsSteadyWhileBlinkPatternsChange() {
         let hints = [
             LEDHint(square: .a1, pattern: .steady),
@@ -257,6 +276,21 @@ final class OTBGameSessionTests: XCTestCase {
     }
 
 #if !SWIFT_PACKAGE
+    func testMonitoredTransportBroadcastsDisconnectWithoutHidingItFromClientStream() async {
+        let underlying = TestEasyLinkTransport()
+        let monitored = MonitoredEasyLinkTransport(wrapping: underlying)
+        var clientNotifications = monitored.notifications.makeAsyncIterator()
+        var connectionEvents = monitored.connectionEvents.makeAsyncIterator()
+
+        underlying.emit(.disconnected)
+
+        let clientNotification = await clientNotifications.next()
+        let connectionEvent = await connectionEvents.next()
+
+        XCTAssertEqual(clientNotification, .disconnected)
+        XCTAssertEqual(connectionEvent, .disconnected)
+    }
+
     func testStockfishScoreInversionAndOrderingForCoaching() {
         XCTAssertEqual(StockfishScore.centipawns(-42).inverted, .centipawns(42))
         XCTAssertEqual(StockfishScore.mate(5).inverted, .mate(-5))
@@ -343,3 +377,30 @@ final class OTBGameSessionTests: XCTestCase {
         fen.split(separator: " ").first.map(String.init) ?? fen
     }
 }
+
+#if !SWIFT_PACKAGE
+private final class TestEasyLinkTransport: EasyLinkTransport, @unchecked Sendable {
+    let notifications: AsyncStream<EasyLinkNotification>
+    private let continuation: AsyncStream<EasyLinkNotification>.Continuation
+
+    init() {
+        var continuation: AsyncStream<EasyLinkNotification>.Continuation!
+        notifications = AsyncStream { continuation = $0 }
+        self.continuation = continuation
+    }
+
+    func connect() async throws {}
+
+    func disconnect() async {
+        emit(.disconnected)
+    }
+
+    func write(_ command: [UInt8]) async throws {
+        _ = command
+    }
+
+    func emit(_ notification: EasyLinkNotification) {
+        continuation.yield(notification)
+    }
+}
+#endif

@@ -1,6 +1,50 @@
 import ChessKit
 import Foundation
 
+enum ChessnutAppPhase: Equatable, Sendable {
+    case active
+    case inactive
+    case background
+}
+
+struct ChessnutLifecycleDirective: Equatable, Sendable {
+    let invalidateTransientAssistance: Bool
+    let requestFreshBoardSnapshot: Bool
+    let probeConnection: Bool
+
+    static let none = ChessnutLifecycleDirective(
+        invalidateTransientAssistance: false,
+        requestFreshBoardSnapshot: false,
+        probeConnection: false
+    )
+}
+
+struct ChessnutSessionLifecycle: Equatable, Sendable {
+    private(set) var phase: ChessnutAppPhase = .active
+
+    mutating func transition(to newPhase: ChessnutAppPhase) -> ChessnutLifecycleDirective {
+        guard newPhase != phase else { return .none }
+        phase = newPhase
+
+        switch newPhase {
+        case .inactive:
+            return .none
+        case .background:
+            return ChessnutLifecycleDirective(
+                invalidateTransientAssistance: true,
+                requestFreshBoardSnapshot: false,
+                probeConnection: false
+            )
+        case .active:
+            return ChessnutLifecycleDirective(
+                invalidateTransientAssistance: true,
+                requestFreshBoardSnapshot: true,
+                probeConnection: true
+            )
+        }
+    }
+}
+
 enum GameLifecycleStatus: String, Codable, Sendable {
     case playing
     case finished

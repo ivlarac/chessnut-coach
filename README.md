@@ -104,6 +104,33 @@ Para reducir el tiempo desde que se levanta una pieza hasta que aparecen las luc
 
 El controlador de LEDs mantiene un único bucle que compone la matriz completa cada 250 ms. No se crean procesos BLE independientes por casilla.
 
+## Pantalla bloqueada y Bluetooth en segundo plano
+
+La app declara `bluetooth-central` como modo de ejecución en segundo plano. La sesión de partida y el cliente Chessnut pertenecen al ciclo de vida de la app, no a una pantalla concreta, por lo que se conservan al bloquear el iPhone o cambiar temporalmente de aplicación.
+
+Al pasar a segundo plano se cancelan únicamente los análisis Stockfish y patrones LED transitorios que ya estaban en curso. Las notificaciones FEN del Chessnut siguen activas: una nueva pieza levantada crea un análisis nuevo y puede encender sus LEDs con la pantalla bloqueada.
+
+Al volver al primer plano la app:
+
+1. invalida cualquier resultado de ayuda iniciado antes de la suspensión;
+2. comprueba que la conexión BLE continúa respondiendo;
+3. vuelve a solicitar las notificaciones en tiempo real;
+4. espera una posición física nueva antes de confirmar la sincronización;
+5. conserva la partida lógica, el turno, el FEN y el historial.
+
+Si CoreBluetooth informa de una desconexión, se descartan los LEDs y análisis asociados al cliente antiguo y se crea un cliente nuevo con reintentos automáticos cada dos segundos. La reconexión nunca reinicia la partida. Como en cualquier app iOS Bluetooth, este comportamiento cubre bloqueo y suspensión normal; cerrar la app expresamente desde el selector de aplicaciones finaliza la sesión del proceso.
+
+Validación física obligatoria antes del merge:
+
+1. conecta el Chessnut Air y juega al menos `1.e4`;
+2. levanta una pieza y confirma los LEDs de Calidad;
+3. devuelve la pieza, bloquea el iPhone y levanta la pieza del bando que tiene el turno;
+4. confirma que aparecen LEDs con la pantalla apagada y completa el movimiento;
+5. desbloquea y confirma turno, historial y posición sincronizada;
+6. verifica que no aparece ningún patrón del análisis anterior al bloqueo;
+7. con una partida en curso, apaga y enciende el Chessnut para forzar la reconexión;
+8. confirma que la app indica reconexión y recupera la misma partida sin duplicar movimientos.
+
 ## Diagnóstico Stockfish 18
 
 La sección **Stockfish 18 · diagnóstico** continúa disponible para pruebas manuales con FEN:
@@ -124,6 +151,8 @@ CI:
 - ejecuta todos los tests del núcleo OTB;
 - comprueba los umbrales 50/200 cp y su mapeo a fijo/lento/rápido;
 - verifica que Calidad Stockfish no utiliza pistas simuladas como fallback;
+- verifica las directivas de ciclo `active` / `inactive` / `background`;
+- verifica que la desconexión BLE se reenvía tanto al cliente como al coordinador de reconexión;
 - arranca Stockfish 18 realmente en iOS Simulator;
 - analiza los destinos `e2→e3` y `e2→e4` mediante la misma capa de coaching usada por el Chessnut.
 
