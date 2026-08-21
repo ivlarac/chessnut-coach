@@ -1,3 +1,4 @@
+import ChessKit
 import Foundation
 
 enum StockfishEngineError: LocalizedError, Sendable {
@@ -62,6 +63,11 @@ actor StockfishEngine {
     }
 
     func analyze(fen: String, nodeLimit: UInt64? = nil) throws -> StockfishAnalysis {
+        let requestedFEN = fen.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !requestedFEN.isEmpty, Position(fen: requestedFEN) != nil else {
+            throw StockfishEngineError.search("FEN no válida. Corrige la posición antes de analizar.")
+        }
+
         let native = try ensureEngine()
 
         var scoreKind: Int32 = 0
@@ -71,7 +77,7 @@ actor StockfishEngine {
         var bestMove = [CChar](repeating: 0, count: 32)
         var error = [CChar](repeating: 0, count: 512)
 
-        let succeeded = fen.withCString { fenPointer in
+        let succeeded = requestedFEN.withCString { fenPointer in
             bestMove.withUnsafeMutableBufferPointer { bestBuffer in
                 error.withUnsafeMutableBufferPointer { errorBuffer in
                     CCStockfishSearch(
