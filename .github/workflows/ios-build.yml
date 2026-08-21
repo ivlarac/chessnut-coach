@@ -1,0 +1,30 @@
+name: iOS Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - poc/chessnut-air-ble
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project ChessnutCoach.xcodeproj -scheme ChessnutCoach
+
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild \
+            -project ChessnutCoach.xcodeproj \
+            -scheme ChessnutCoach \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
