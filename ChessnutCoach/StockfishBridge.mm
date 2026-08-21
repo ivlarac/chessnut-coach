@@ -72,6 +72,14 @@ void setOption(Stockfish::Engine& engine, std::string_view name, std::string_vie
     engine.get_options().setoption(command);
 }
 
+void clearCallbacks(Stockfish::Engine& engine) {
+    engine.set_on_update_no_moves({});
+    engine.set_on_update_full({});
+    engine.set_on_iter({});
+    engine.set_on_bestmove({});
+    engine.set_on_verify_networks({});
+}
+
 struct NativeResult {
     int32_t scoreKind = CCStockfishScoreNone;
     int32_t scoreValue = 0;
@@ -227,10 +235,22 @@ bool CCStockfishSearch(
 
         engine->engine->stop();
         engine->engine->wait_for_search_finished();
-        engine->engine->set_position(
-            (fen == nullptr || *fen == '\0') ? std::string(kStartFEN) : std::string(fen),
+
+        const std::string requestedFEN =
+            (fen == nullptr || *fen == '\0') ? std::string(kStartFEN) : std::string(fen);
+        const auto positionError = engine->engine->set_position(
+            requestedFEN,
             std::vector<std::string>{}
         );
+        if (positionError.has_value()) {
+            engine->searching.store(false);
+            clearCallbacks(*engine->engine);
+            return fail(
+                std::string("FEN no válida: ") + positionError->what(),
+                error,
+                errorCap
+            );
+        }
 
         Stockfish::Search::LimitsType limits;
         limits.startTime = Stockfish::now();
@@ -243,6 +263,7 @@ bool CCStockfishSearch(
 
         std::lock_guard resultLock(resultMutex);
         if (!result.hasScore) {
+            clearCallbacks(*engine->engine);
             return fail("Stockfish terminó sin producir una evaluación.", error, errorCap);
         }
 
@@ -252,18 +273,15 @@ bool CCStockfishSearch(
         if (nodes) *nodes = result.nodes;
         writeString(result.bestMove, bestMove, bestCap);
 
-        // Detach callbacks that captured stack storage.
-        engine->engine->set_on_update_no_moves({});
-        engine->engine->set_on_update_full({});
-        engine->engine->set_on_iter({});
-        engine->engine->set_on_bestmove({});
-        engine->engine->set_on_verify_networks({});
+        clearCallbacks(*engine->engine);
         return true;
     } catch (const std::exception& exception) {
         engine->searching.store(false);
+        try { clearCallbacks(*engine->engine); } catch (...) {}
         return fail(std::string("El análisis de Stockfish falló: ") + exception.what(), error, errorCap);
     } catch (...) {
         engine->searching.store(false);
+        try { clearCallbacks(*engine->engine); } catch (...) {}
         return fail("El análisis de Stockfish falló por un error nativo desconocido.", error, errorCap);
     }
 }
