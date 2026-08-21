@@ -8,6 +8,7 @@ struct ContentView: View {
     }
 
     @StateObject private var board = BoardController()
+    @StateObject private var engineDiagnostic = EngineDiagnosticController()
     @State private var rankIndex = 0
     @State private var fileIndex = 0
     @State private var finishAction: FinishAction?
@@ -18,6 +19,7 @@ struct ContentView: View {
             Form {
                 connectionSection
                 assistanceSection
+                stockfishSection
                 gameSection
                 historySection
                 positionSection
@@ -101,7 +103,7 @@ struct ContentView: View {
                 }
             }
 
-            Text("La calidad todavía es simulada y determinista. No hay Stockfish en esta fase: sirve para validar la interfaz y los tres patrones LED antes de conectar el motor.")
+            Text("La calidad de los LEDs sigue siendo simulada en esta fase. Stockfish se valida por separado y se conectará a estos patrones en la fase 5.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -130,6 +132,50 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    private var stockfishSection: some View {
+        Section("Stockfish 18 · diagnóstico") {
+            LabeledContent("Motor", value: engineDiagnostic.version)
+            LabeledContent("Estado", value: engineDiagnostic.status)
+
+            TextField("FEN", text: $engineDiagnostic.fen, axis: .vertical)
+                .font(.system(.footnote, design: .monospaced))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            HStack {
+                Button("Inicial") {
+                    engineDiagnostic.useStartingPosition()
+                }
+                .buttonStyle(.borderless)
+
+                Button("Tras 1.e4") {
+                    engineDiagnostic.useAfterE4Position()
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if engineDiagnostic.isAnalyzing {
+                ProgressView("Analizando…")
+                Button("Detener", role: .destructive) {
+                    engineDiagnostic.stop()
+                }
+            } else {
+                Button("Analizar FEN con Stockfish 18") {
+                    engineDiagnostic.analyze()
+                }
+            }
+
+            LabeledContent("Mejor movimiento", value: engineDiagnostic.bestMove)
+            LabeledContent("Evaluación", value: engineDiagnostic.evaluation)
+            LabeledContent("Profundidad", value: engineDiagnostic.depth)
+            LabeledContent("Nodos", value: engineDiagnostic.nodes)
+
+            Text("El análisis se ejecuta íntegramente en el iPhone. En esta fase sus resultados todavía no controlan los LEDs.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var gameSection: some View {
@@ -260,9 +306,9 @@ struct ContentView: View {
 
     private var notesSection: some View {
         Section("Estado del proyecto") {
-            Text("Fase 3: la ayuda puede configurarse de forma independiente para blancas y negras. Los destinos pueden mostrarse fijos o con calidad simulada mediante tres patrones temporales.")
+            Text("Fase 4: Stockfish 18 se ejecuta localmente y puede analizar una FEN devolviendo mejor movimiento, evaluación, profundidad y nodos.")
 
-            Text("Stockfish todavía no está integrado. La siguiente fase añadirá el motor local; después sustituiremos la clasificación simulada por evaluación real de cada destino.")
+            Text("La ayuda del Chessnut continúa usando calidad simulada. La fase 5 utilizará las evaluaciones reales del motor para asignar fijo/lento/rápido a cada destino legal.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

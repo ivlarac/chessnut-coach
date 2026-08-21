@@ -4,5 +4,9 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 
+# Stockfish NNUE networks (downloaded and SHA-256 verified by build script)
+StockfishNetworks/*.nnue
+StockfishNetworks/*.tmp
+
 # macOS
 .DS_Store

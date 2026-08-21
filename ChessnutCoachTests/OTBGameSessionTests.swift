@@ -133,10 +133,10 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(session.moves.count, 0)
         XCTAssertTrue(session.isPromotionPending)
 
-        guard case let .promotion(move) = physicalBoard.state else {
+        guard case let .promotion(promotionMove) = physicalBoard.state else {
             return XCTFail("Shadow board should require promotion")
         }
-        _ = physicalBoard.completePromotion(of: move, to: .queen)
+        _ = physicalBoard.completePromotion(of: promotionMove, to: .queen)
 
         let completedEvent = session.process(physicalPlacement: placement(from: physicalBoard.position.fen))
         guard case .moveCompleted = completedEvent else {
@@ -245,6 +245,35 @@ final class OTBGameSessionTests: XCTestCase {
             ["a1", "b1", "c1"]
         )
     }
+
+#if !SWIFT_PACKAGE
+    func testStockfish18AnalyzesRejectsInvalidFENAndRecovers() async throws {
+        let engine = StockfishEngine(defaultNodeLimit: 10_000)
+        let startFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        let afterE4FEN = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+
+        let version = await engine.version()
+        XCTAssertEqual(version, "Stockfish 18")
+
+        let first = try await engine.analyze(fen: startFEN)
+        XCTAssertEqual(first.version, "Stockfish 18")
+        XCTAssertFalse(first.bestMove.isEmpty)
+        XCTAssertGreaterThan(first.depth, 0)
+        XCTAssertGreaterThan(first.nodes, 0)
+
+        do {
+            _ = try await engine.analyze(fen: "not a fen")
+            XCTFail("An invalid FEN should fail")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("FEN no válida"))
+        }
+
+        let recovered = try await engine.analyze(fen: afterE4FEN)
+        XCTAssertEqual(recovered.version, "Stockfish 18")
+        XCTAssertFalse(recovered.bestMove.isEmpty)
+        XCTAssertGreaterThan(recovered.nodes, 0)
+    }
+#endif
 
     @discardableResult
     private func apply(

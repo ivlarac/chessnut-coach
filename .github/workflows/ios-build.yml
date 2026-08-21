@@ -9,26 +9,80 @@ on:
 jobs:
   build-and-test:
     runs-on: macos-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Cache Stockfish 18 NNUE networks
+        uses: actions/cache@v4
+        with:
+          path: StockfishNetworks
+          key: stockfish18-nnue-c288c895ea92-37f18f62d772
 
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project ChessnutCoach.xcodeproj -scheme ChessnutCoach
 
       - name: Build for iOS Simulator
+        id: iosbuild
+        continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
           xcodebuild \
             -project ChessnutCoach.xcodeproj \
             -scheme ChessnutCoach \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee /tmp/xcodebuild.log
+
+      - name: Show concise build errors
+        if: steps.iosbuild.outcome == 'failure'
+        run: |
+          echo '--- relevant xcodebuild errors ---'
+          grep -E '(^| )error:|fatal error:|PhaseScriptExecution|Stockfish|BUILD FAILED|Undefined symbols|ld:' /tmp/xcodebuild.log | tail -250 || true
+
+      - name: Upload build log on failure
+        if: steps.iosbuild.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stockfish-build-log
+          path: /tmp/xcodebuild.log
+          retention-days: 2
+
+      - name: Fail after build diagnostics
+        if: steps.iosbuild.outcome == 'failure'
+        run: exit 1
+
+      - name: Run iOS unit and Stockfish runtime tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIMULATOR_ID="$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin).get("devices", {})
+          for runtime, entries in devices.items():
+              if "iOS" not in runtime:
+                  continue
+              for device in entries:
+                  if device.get("isAvailable"):
+                      print(device["udid"])
+                      raise SystemExit(0)
+          raise SystemExit("No available iOS Simulator found")
+          ')"
+          echo "Using iOS Simulator $SIMULATOR_ID"
+          xcodebuild \
+            -project ChessnutCoach.xcodeproj \
+            -scheme ChessnutCoach \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
 
       - name: Run game-core unit tests
         run: swift test
