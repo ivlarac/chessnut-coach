@@ -168,7 +168,7 @@ actor StockfishEngine {
         }
 
         guard succeeded else {
-            throw StockfishEngineError.search(String(cString: error))
+            throw StockfishEngineError.search(decodeCString(error))
         }
 
         let score: StockfishScore
@@ -185,7 +185,7 @@ actor StockfishEngine {
 
         return StockfishAnalysis(
             version: version(),
-            bestMove: String(cString: bestMove),
+            bestMove: decodeCString(bestMove),
             score: score,
             depth: Int(depth),
             nodes: nodes
@@ -221,13 +221,18 @@ actor StockfishEngine {
         }
 
         guard let created else {
-            throw StockfishEngineError.initialization(String(cString: error))
+            throw StockfishEngineError.initialization(decodeCString(error))
         }
 
         let nativeHandle = StockfishNativeHandle(created)
         handle = nativeHandle
         return nativeHandle.pointer
     }
+}
+
+private func decodeCString(_ buffer: [CChar]) -> String {
+    let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+    return String(decoding: bytes, as: UTF8.self)
 }
 
 actor StockfishMoveCoach {

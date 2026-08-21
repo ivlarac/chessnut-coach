@@ -317,8 +317,85 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertTrue(pgn.contains("[White \"Ana \\\"A\\\"\"]"))
         XCTAssertTrue(pgn.contains("[Black \"Luis\"]"))
         XCTAssertTrue(pgn.contains("[Result \"1-0\"]"))
+        XCTAssertTrue(pgn.contains("[Round \"-\"]"))
+        XCTAssertTrue(pgn.contains("[PlyCount \"3\"]"))
+        XCTAssertTrue(pgn.contains("[Termination \"normal\"]"))
         XCTAssertTrue(pgn.contains("1. e4 e5 2. Nf3 1-0"))
         XCTAssertFalse(pgn.contains("[SetUp"))
+        XCTAssertEqual(String(decoding: PGNExporter.data(for: record), as: UTF8.self), pgn)
+    }
+
+    func testPGNExporterNumbersCustomBlackToMovePositionCorrectly() {
+        let date = Date(timeIntervalSince1970: 1_704_110_400)
+        let initialFEN = "7k/8/8/8/8/8/K7/8 b - - 0 23"
+        let moves = [
+            GameMoveRecord(
+                ply: 1,
+                san: "Kh7",
+                lan: "h8h7",
+                from: "h8",
+                to: "h7",
+                fenBefore: initialFEN,
+                fenAfter: "7/7k/8/8/8/8/K7/8 w - - 1 24",
+                playedAt: date
+            ),
+            GameMoveRecord(
+                ply: 2,
+                san: "Ka2",
+                lan: "a2a3",
+                from: "a2",
+                to: "a3",
+                fenBefore: "7/7k/8/8/8/8/K7/8 w - - 1 24",
+                fenAfter: "7/7k/8/8/8/K7/8/8 b - - 2 24",
+                playedAt: date
+            ),
+        ]
+        let record = GameRecord(
+            startedAt: date,
+            initialFEN: initialFEN,
+            moves: moves,
+            status: .playing
+        )
+
+        let pgn = PGNExporter.pgn(for: record)
+
+        XCTAssertTrue(pgn.contains("[SetUp \"1\"]"))
+        XCTAssertTrue(pgn.contains("[FEN \"\(initialFEN)\"]"))
+        XCTAssertTrue(pgn.contains("[Termination \"unterminated\"]"))
+        XCTAssertTrue(pgn.contains("23... Kh7 24. Ka2 *"))
+    }
+
+    func testPGNExporterPreservesSpecialSANAndWrapsMoveTextAt80Columns() {
+        let date = Date(timeIntervalSince1970: 1_704_110_400)
+        let specialSAN = ["O-O", "exd6", "e8=Q+", "Qh4#"]
+        let longSAN = Array(repeating: "Nabcdefghxabcdefgh=Q+", count: 14)
+        let allSAN = specialSAN + longSAN
+        let moves = allSAN.enumerated().map { index, san in
+            GameMoveRecord(
+                ply: index + 1,
+                san: san,
+                lan: "a1a2",
+                from: "a1",
+                to: "a2",
+                fenBefore: Position.standard.fen,
+                fenAfter: Position.standard.fen,
+                playedAt: date
+            )
+        }
+        let record = GameRecord(
+            startedAt: date,
+            initialFEN: Position.standard.fen,
+            moves: moves,
+            status: .aborted
+        )
+
+        let pgn = PGNExporter.pgn(for: record)
+        let moveText = pgn.components(separatedBy: "\n\n").last ?? ""
+
+        XCTAssertTrue(moveText.contains("1. O-O exd6 2. e8=Q+ Qh4#"))
+        XCTAssertTrue(pgn.contains("[Termination \"abandoned\"]"))
+        XCTAssertTrue(moveText.split(separator: "\n").allSatisfy { $0.count <= 80 })
+        XCTAssertTrue(moveText.hasSuffix("*\n"))
     }
 
     func testReplayAndSessionRestoreReturnEveryArchivedPosition() throws {
