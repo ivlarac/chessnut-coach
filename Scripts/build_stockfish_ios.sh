@@ -22,7 +22,14 @@ bash "$ROOT/Scripts/fetch_stockfish_networks.sh"
 mkdir -p "$OUT_ROOT"
 
 ARCH_LIST="${ARCHS:-arm64}"
-KEY="$EXPECTED_COMMIT|${SDK_NAME:-unknown}|$ARCH_LIST|${CONFIGURATION:-Debug}"
+SOURCE_SIGNATURE="$({
+  shasum -a 256 \
+    "$ROOT/Scripts/build_stockfish_ios.sh" \
+    "$ROOT/ChessnutCoach/StockfishBridge.h" \
+    "$ROOT/ChessnutCoach/StockfishBridge.mm" \
+    "$ROOT/ChessnutCoach/StockfishBuildConfig.h"
+} | shasum -a 256 | awk '{print $1}')"
+KEY="$EXPECTED_COMMIT|${SDK_NAME:-unknown}|$ARCH_LIST|${CONFIGURATION:-Debug}|$SOURCE_SIGNATURE"
 STAMP="$OUT_ROOT/build-key.txt"
 if [ -f "$FINAL_LIB" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$KEY" ]; then
   echo "Stockfish 18 static library is up to date"

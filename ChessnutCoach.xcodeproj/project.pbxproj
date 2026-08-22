@@ -244,6 +244,10 @@
 			files = (
 			);
 			inputPaths = (
+				"$(SRCROOT)/Scripts/build_stockfish_ios.sh",
+				"$(SRCROOT)/ChessnutCoach/StockfishBridge.h",
+				"$(SRCROOT)/ChessnutCoach/StockfishBridge.mm",
+				"$(SRCROOT)/ChessnutCoach/StockfishBuildConfig.h",
 			);
 			name = "Build Stockfish 18";
 			outputPaths = (

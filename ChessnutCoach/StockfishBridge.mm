@@ -178,7 +178,7 @@ void CCStockfishStop(CCStockfishEngine *engine) {
     try { engine->engine->stop(); } catch (...) {}
 }
 
-bool CCStockfishSearch(
+bool CCStockfishSearchV2(
     CCStockfishEngine *engine,
     const char *fen,
     uint64_t nodeLimit,
