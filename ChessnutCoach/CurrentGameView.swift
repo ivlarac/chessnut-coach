@@ -12,6 +12,10 @@ struct CurrentGameView: View {
     @State private var isFinishDialogPresented = false
     @State private var isNewGamePresented = false
 
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.7"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -24,7 +28,7 @@ struct CurrentGameView: View {
                 .padding()
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("Chessnut Coach")
+            .navigationTitle("Chessnut Coach v\(appVersion)")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -474,6 +478,14 @@ private struct NewGameSetupView: View {
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                        Divider()
+
+                        Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
+
+                        Text("Podrás deshacer desde el iPhone o devolviendo físicamente la última jugada a la posición anterior.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -548,14 +560,6 @@ private struct NewGameSetupView: View {
                             title: "Negras",
                             selection: $blackAssistance
                         )
-                    }
-
-                    Section("Deshacer jugadas") {
-                        Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
-
-                        Text("Si está activado, podrás deshacer desde el iPhone o devolviendo físicamente la última jugada a la posición anterior.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
