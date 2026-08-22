@@ -1,10 +1,11 @@
-name: iOS Build & Tests
+name: iOS Build, Tests & IPA
 
 on:
   pull_request:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -27,6 +28,50 @@ jobs:
 
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project ChessnutCoach.xcodeproj -scheme ChessnutCoach
+
+      - name: Build unsigned IPA for iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          DERIVED_DATA="$RUNNER_TEMP/ChessnutCoachDerivedData"
+          PACKAGE_DIR="$RUNNER_TEMP/ChessnutCoachIPA"
+
+          xcodebuild \
+            -project ChessnutCoach.xcodeproj \
+            -scheme ChessnutCoach \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP_PATH="$(find "$DERIVED_DATA/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [[ -z "$APP_PATH" ]]; then
+            echo "No .app bundle found after device build" >&2
+            exit 1
+          fi
+
+          rm -rf "$PACKAGE_DIR"
+          mkdir -p "$PACKAGE_DIR/Payload"
+          cp -R "$APP_PATH" "$PACKAGE_DIR/Payload/"
+          (
+            cd "$PACKAGE_DIR"
+            zip -qry "$GITHUB_WORKSPACE/ChessnutCoach.ipa" Payload
+          )
+
+          echo "Created $GITHUB_WORKSPACE/ChessnutCoach.ipa"
+          ls -lh "$GITHUB_WORKSPACE/ChessnutCoach.ipa"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChessnutCoach-IPA
+          path: ChessnutCoach.ipa
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Build for iOS Simulator
         id: iosbuild
