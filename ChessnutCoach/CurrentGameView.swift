@@ -12,6 +12,7 @@ struct CurrentGameView: View {
     @State private var isFinishDialogPresented = false
     @State private var isNewGamePresented = false
     @State private var boardPerspective = ChessBoardPerspective.whiteAtBottom
+    @State private var automaticBoardRotationEnabled = false
 
     var body: some View {
         NavigationStack {
@@ -64,9 +65,14 @@ struct CurrentGameView: View {
                 NewGameSetupView(
                     whiteAssistance: board.whiteAssistanceMode,
                     blackAssistance: board.blackAssistanceMode
-                ) { configuration in
+                ) { configuration, automaticRotation in
+                    automaticBoardRotationEnabled = automaticRotation
                     board.newGame(configuration: configuration)
+                    synchronizeAutomaticBoardPerspective()
                 }
+            }
+            .onChange(of: board.moveCount) { _ in
+                synchronizeAutomaticBoardPerspective()
             }
         }
     }
@@ -574,6 +580,17 @@ struct CurrentGameView: View {
         isFinishDialogPresented = true
     }
 
+    private func synchronizeAutomaticBoardPerspective() {
+        guard automaticBoardRotationEnabled,
+              board.hasActiveGame,
+              !board.isSoloGame
+        else { return }
+
+        boardPerspective = board.moveCount.isMultiple(of: 2)
+            ? .whiteAtBottom
+            : ChessBoardPerspective.whiteAtBottom.opposite
+    }
+
     private func batterySymbol(for percentage: Int) -> String {
         switch percentage {
         case 76...: "battery.100percent"
@@ -754,13 +771,14 @@ private struct NewGameSetupView: View {
     @State private var whiteAssistance: AssistanceMode
     @State private var blackAssistance: AssistanceMode
     @State private var allowUndo = false
+    @State private var automaticBoardRotation = false
 
-    let onStart: (NewGameConfiguration) -> Void
+    let onStart: (NewGameConfiguration, Bool) -> Void
 
     init(
         whiteAssistance: AssistanceMode,
         blackAssistance: AssistanceMode,
-        onStart: @escaping (NewGameConfiguration) -> Void
+        onStart: @escaping (NewGameConfiguration, Bool) -> Void
     ) {
         _humanAssistance = State(initialValue: whiteAssistance)
         _whiteAssistance = State(initialValue: whiteAssistance)
@@ -799,6 +817,14 @@ private struct NewGameSetupView: View {
                         Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
 
                         Text("Con el tablero físico podrás devolver la jugada allí; en pantalla se deshará inmediatamente.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Divider()
+
+                        Toggle("Girar automáticamente por turno", isOn: $automaticBoardRotation)
+
+                        Text("Con blancas al turno se mostrarán las blancas abajo; con negras al turno, las negras. Puedes seguir usando el botón Girar manualmente.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -904,7 +930,8 @@ private struct NewGameSetupView: View {
                                 strength: StockfishStrength(level: stockfishLevel),
                                 assistance: assistance,
                                 allowUndo: mode == .twoPlayer && allowUndo
-                            )
+                            ),
+                            mode == .twoPlayer && automaticBoardRotation
                         )
                         dismiss()
                     }
