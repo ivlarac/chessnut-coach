@@ -369,7 +369,15 @@ struct CurrentGameView: View {
                 mode: board.blackAssistanceMode,
                 selection: blackAssistanceBinding
             )
-            .disabled((board.hasActiveGame && board.isSoloGame && board.humanSide == .white) || (board.isConnected && !board.supportsLEDs))\n\n            if board.isConnected && !board.supportsLEDs {\n                Text("Las ayudas por LED no están disponibles con el tablero conectado actualmente.")\n                    .font(.footnote)\n                    .foregroundStyle(.secondary)\n            }\n\n            if !board.activeHintSummary.isEmpty {
+            .disabled((board.hasActiveGame && board.isSoloGame && board.humanSide == .white) || (board.isConnected && !board.supportsLEDs))
+
+            if board.isConnected && !board.supportsLEDs {
+                Text("Las ayudas por LED no están disponibles con el tablero conectado actualmente.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !board.activeHintSummary.isEmpty {
                 Label(board.activeHintSummary, systemImage: "light.beacon.max")
                     .font(.footnote.monospaced())
                     .foregroundStyle(Color.coachAccent)
