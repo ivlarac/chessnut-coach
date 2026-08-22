@@ -114,8 +114,9 @@ protocol ElectronicChessBoard: AnyObject, Sendable {
 
 extension ElectronicChessBoard {
     func setLEDs(_ frame: ElectronicBoardLEDFrame) async throws {
+        // A board without the .leds capability intentionally ignores LED frames.
+        // Callers can keep game flow vendor-neutral without requiring a fake LED implementation.
         _ = frame
-        throw ElectronicBoardError.unsupportedCapability("LEDs")
     }
 
     func batteryStatus(timeout: Duration = .seconds(3)) async throws -> ElectronicBoardBatteryStatus {
