@@ -37,6 +37,30 @@ struct ChessnutEasyLinkBoardDiscovery: ElectronicChessBoardDiscovery {
     }
 }
 
+/// Application-level discovery. Add another vendor here and its adapter factory
+/// to `ElectronicBoardAdapterRegistry.appDefault` to extend hardware support.
+struct DefaultElectronicBoardDiscovery: ElectronicChessBoardDiscovery {
+    private let composite: CompositeElectronicBoardDiscovery
+
+    init(
+        discoveries: [any ElectronicChessBoardDiscovery] = [
+            ChessnutEasyLinkBoardDiscovery(),
+            ChessUpBoardDiscovery(),
+        ]
+    ) {
+        composite = CompositeElectronicBoardDiscovery(discoveries: discoveries)
+    }
+
+    func scan() -> AsyncStream<ElectronicBoardDescriptor> {
+        composite.scan()
+    }
+}
+
+// Compatibility shim for BoardController's existing default initializer. The
+// concrete discovery is now multi-vendor; callers that specifically want only
+// Chessnut can inject ChessnutEasyLinkBoardDiscovery instead.
+typealias ChessnutBoardDiscovery = DefaultElectronicBoardDiscovery
+
 struct ChessnutBoardAdapterFactory: ElectronicBoardAdapterFactory {
     static let adapterIdentifier = "chessnut.easylink"
     let identifier = Self.adapterIdentifier

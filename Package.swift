@@ -34,6 +34,7 @@ let package = Package(
                 "Info.plist",
                 "MonitoredEasyLinkTransport.swift",
                 "ChessnutBoardAdapter.swift",
+                "ChessUpBoardAdapter.swift",
                 "StockfishEngine.swift",
                 "StockfishBridge.h",
                 "StockfishBridge.mm",
