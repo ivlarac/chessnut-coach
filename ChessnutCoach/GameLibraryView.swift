@@ -131,7 +131,7 @@ struct GameDetailView: View {
 
     init(game: GameRecord) {
         self.game = game
-        _selectedPly = State(initialValue: game.moves.count)
+        _selectedPly = State(initialValue: game.status == .finished ? 0 : game.moves.count)
         _exportDocument = State(initialValue: PGNFileDocument(text: PGNExporter.pgn(for: game)))
         _shareFileURL = State(initialValue: try? PGNShareFile.make(for: game))
     }
@@ -224,6 +224,64 @@ struct GameDetailView: View {
                 .buttonStyle(.borderless)
             }
 
+            if game.status == .finished {
+                Section("Análisis completo") {
+                    if analysis.isAnalyzingFullGame {
+                        ProgressView(value: analysis.fullGameProgress) {
+                            Text("Analizando toda la partida con Stockfish 18")
+                        } currentValueLabel: {
+                            Text("\(Int((analysis.fullGameProgress * 100).rounded())) %")
+                                .font(.caption.monospacedDigit())
+                        }
+
+                        Button(role: .destructive) {
+                            analysis.cancelFullGameAnalysis()
+                        } label: {
+                            Label("Detener análisis completo", systemImage: "stop.circle")
+                        }
+                    } else {
+                        Button {
+                            analysis.analyzeFullGame(game)
+                        } label: {
+                            Label(
+                                analysis.fullGameAnalyses.isEmpty ? "Análisis completo" : "Reanalizar partida",
+                                systemImage: "chart.xyaxis.line"
+                            )
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+
+                    Text(analysis.fullGameStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    if !analysis.fullGameAnalyses.isEmpty {
+                        FullGameEvaluationGraph(
+                            samples: analysis.fullGameAnalyses,
+                            selectedPly: $selectedPly,
+                            totalPly: game.moves.count
+                        )
+                        .frame(height: 180)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+
+                        if let selectedAnalysis = analysis.fullGameAnalysis(at: selectedPly) {
+                            HStack {
+                                Text(selectedPly == 0 ? "Posición inicial" : "Medio movimiento \(selectedPly)")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(selectedAnalysis.evaluation.displayText)
+                                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                            }
+                        }
+
+                        Text("La línea central representa 0,00. Una evaluación favorable a blancas hace subir el área blanca sobre la mitad negra; una favorable a negras hace bajar el área negra sobre la mitad blanca. Toca o arrastra sobre la gráfica para saltar a esa posición.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("Movimientos") {
                 if game.moves.isEmpty {
                     Text("No hay movimientos registrados.")
@@ -271,7 +329,7 @@ struct GameDetailView: View {
         .navigationTitle("Detalle")
         .task(id: selectedPly) {
             if game.status == .finished {
-                analysis.analyze(fen: replayFEN)
+                analysis.analyze(fen: replayFEN, ply: selectedPly)
             }
         }
         .onDisappear {
