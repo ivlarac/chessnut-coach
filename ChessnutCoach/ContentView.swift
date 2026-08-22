@@ -43,7 +43,7 @@ private struct AppInformationView: View {
                     LabeledContent("Versión", value: appVersion)
                     LabeledContent("Build", value: buildNumber)
 
-                    Text("Asistente para jugar y registrar partidas de ajedrez con un tablero Chessnut Air, con análisis y ayuda opcional mediante Stockfish 18.")
+                    Text("Asistente para jugar y registrar partidas con tableros electrónicos compatibles, con análisis y ayuda opcional mediante Stockfish 18.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -51,7 +51,7 @@ private struct AppInformationView: View {
                 Section("Funciones principales") {
                     informationRow(
                         title: "Tablero físico",
-                        description: "Conexión Bluetooth con Chessnut Air y seguimiento de la posición en tiempo real.",
+                        description: "Conexión mediante adaptadores de tablero y seguimiento de la posición en tiempo real.",
                         systemImage: "dot.radiowaves.left.and.right"
                     )
                     informationRow(
@@ -61,7 +61,7 @@ private struct AppInformationView: View {
                     )
                     informationRow(
                         title: "Ayuda por LEDs",
-                        description: "Movimientos legales, calidad de jugadas y aviso de blunders configurable por bando.",
+                        description: "Movimientos legales, calidad de jugadas y aviso de blunders configurable por bando cuando el tablero dispone de LEDs.",
                         systemImage: "lightbulb.max.fill"
                     )
                     informationRow(
@@ -79,7 +79,11 @@ private struct AppInformationView: View {
                 Section("Compatibilidad") {
                     LabeledContent("iOS", value: "16 o posterior")
                     LabeledContent("Motor", value: "Stockfish 18")
-                    LabeledContent("Tablero", value: "Chessnut Air")
+                    LabeledContent("Chessnut clásico", value: "Air · Air+ · Go · Pro")
+                    LabeledContent("Chessnut Move", value: "EasyLink")
+                    Text("La comunicación con el hardware usa una capa de adaptadores preparada para añadir otros fabricantes sin acoplar la lógica de partida a su protocolo.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Licencia y autoría") {
