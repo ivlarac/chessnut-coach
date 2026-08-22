@@ -10,6 +10,38 @@ struct SoloEngineSuggestion: Equatable, Sendable {
     var displayText: String { move.displayText }
 }
 
+enum ScreenPromotionChoice: String, CaseIterable, Identifiable, Sendable {
+    case queen
+    case rook
+    case bishop
+    case knight
+
+    var id: String { rawValue }
+
+    var displayText: String {
+        switch self {
+        case .queen: "Dama"
+        case .rook: "Torre"
+        case .bishop: "Alfil"
+        case .knight: "Caballo"
+        }
+    }
+
+    var pieceKind: Piece.Kind {
+        switch self {
+        case .queen: .queen
+        case .rook: .rook
+        case .bishop: .bishop
+        case .knight: .knight
+        }
+    }
+}
+
+struct ScreenPromotionRequest: Equatable, Sendable {
+    let from: Square
+    let to: Square
+}
+
 @MainActor
 final class BoardController: ObservableObject {
     @Published private(set) var isConnected = false
@@ -39,6 +71,8 @@ final class BoardController: ObservableObject {
     @Published private(set) var isUndoAllowed = false
     @Published private(set) var canUndoMove = false
     @Published private(set) var hasActiveGame = false
+    @Published private(set) var screenHints: [LEDHint] = []
+    @Published private(set) var screenPromotionRequest: ScreenPromotionRequest?
 
     @Published private(set) var assistanceSettings = AssistanceSettings()
     @Published private(set) var activeHintSummary = ""
@@ -103,11 +137,13 @@ final class BoardController: ObservableObject {
            let restoredSession = try? OTBGameSession(restoring: savedGame) {
             gameSession = restoredSession
             hasActiveGame = true
-            gameStatus = "Partida recuperada. Conecta el tablero y coloca la posición guardada para continuar."
+            gameStatus = "Partida recuperada. Puedes continuar en pantalla o conectar el Chessnut."
         }
 
         publishGameState()
-        if !hasActiveGame {
+        if hasActiveGame {
+            prepareScreenTurn()
+        } else {
             gameStatus = idleGameStatus
         }
     }
@@ -147,6 +183,7 @@ final class BoardController: ObservableObject {
                 self.status = isReconnect
                     ? "Reconectado · validando posición del tablero…"
                     : "Conectado · esperando posición del tablero…"
+                self.clearScreenInteraction()
                 self.prepareForFreshPhysicalSnapshot()
                 self.startDisconnectionStream(transport: transport, client: client)
                 self.startFENStream(client: client)
@@ -156,6 +193,7 @@ final class BoardController: ObservableObject {
                 self.client = nil
                 self.isConnected = false
                 self.status = "Conexión perdida · nuevo intento en breve"
+                self.prepareScreenTurn()
             }
 
             self.connectionTask = nil
@@ -213,6 +251,7 @@ final class BoardController: ObservableObject {
                 )
             } else {
                 scheduleReconnect(immediately: true)
+                prepareScreenTurn()
             }
         }
     }
@@ -228,6 +267,7 @@ final class BoardController: ObservableObject {
     func newGame(configuration: NewGameConfiguration = NewGameConfiguration()) {
         invalidateTransientAssistance(turnOffLEDs: isConnected)
         cancelEngineMoveRequest(clearSuggestion: true)
+        screenPromotionRequest = nil
         assistanceSettings = configuration.assistance
 
         let engineName = "Stockfish 18"
@@ -263,10 +303,16 @@ final class BoardController: ObservableObject {
         lastProcessedPlacement = ""
         activeHintSummary = ""
         publishGameState()
+        persistCurrentGameIfNeeded()
+
+        if !isConnected {
+            prepareScreenTurn()
+            return
+        }
+
         gameStatus = configuration.mode == .solo
             ? "Partida en solitario preparada. Coloca todas las piezas en la posición inicial."
             : "Nueva partida. Coloca todas las piezas en la posición inicial."
-        persistCurrentGameIfNeeded()
 
         guard let client, !boardPlacement.isEmpty else { return }
         schedulePhysicalPlacement(boardPlacement, client: client, force: true)
@@ -275,12 +321,18 @@ final class BoardController: ObservableObject {
     func setWhiteAssistanceMode(_ mode: AssistanceMode) {
         assistanceSettings.white = mode
         refreshCurrentAssistanceIfNeeded()
+        if !isConnected {
+            refreshScreenAssistanceIfNeeded()
+        }
         scheduleStockfishPrewarmIfNeeded()
     }
 
     func setBlackAssistanceMode(_ mode: AssistanceMode) {
         assistanceSettings.black = mode
         refreshCurrentAssistanceIfNeeded()
+        if !isConnected {
+            refreshScreenAssistanceIfNeeded()
+        }
         scheduleStockfishPrewarmIfNeeded()
     }
 
@@ -300,14 +352,21 @@ final class BoardController: ObservableObject {
 
     func undoLastMove() {
         guard hasActiveGame,
-              let undoneMove = gameSession.undoLastMove(awaitPhysicalRestore: true)
+              let undoneMove = gameSession.undoLastMove(awaitPhysicalRestore: isConnected)
         else { return }
 
         invalidateTransientAssistance(turnOffLEDs: isConnected)
         cancelEngineMoveRequest(clearSuggestion: true)
+        screenPromotionRequest = nil
         publishGameState()
         persistAfterUndo()
-        gameStatus = "Jugada \(undoneMove.san) deshecha. Devuelve físicamente las piezas a la posición anterior para continuar."
+
+        if isConnected {
+            gameStatus = "Jugada \(undoneMove.san) deshecha. Devuelve físicamente las piezas a la posición anterior para continuar."
+        } else {
+            gameStatus = "Jugada \(undoneMove.san) deshecha. Continúa desde el tablero en pantalla."
+            prepareScreenTurn()
+        }
     }
 
     func resignCurrentSide() {
@@ -471,6 +530,7 @@ final class BoardController: ObservableObject {
         invalidateTransientAssistance(turnOffLEDs: false)
         cancelEngineMoveRequest(clearSuggestion: false)
         prepareForFreshPhysicalSnapshot()
+        prepareScreenTurn()
         Task {
             await disconnectedClient.disconnect()
         }
@@ -1090,6 +1150,7 @@ final class BoardController: ObservableObject {
         ledTask?.cancel()
         ledTask = nil
         clearStockfishHints()
+        screenHints = []
         activeHintSummary = ""
 
         guard turnOffLEDs, let client else { return }
@@ -1160,6 +1221,8 @@ final class BoardController: ObservableObject {
             engineStrength = nil
             isUndoAllowed = false
             canUndoMove = false
+            screenHints = []
+            screenPromotionRequest = nil
         }
     }
 
@@ -1197,6 +1260,7 @@ final class BoardController: ObservableObject {
     private func returnToIdleState() {
         invalidateTransientAssistance(turnOffLEDs: isConnected)
         cancelEngineMoveRequest(clearSuggestion: true)
+        screenPromotionRequest = nil
 
         let idleWhite = normalizedNonEnginePlayerName(whitePlayerName, fallback: "Blancas")
         let idleBlack = normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
@@ -1255,8 +1319,370 @@ final class BoardController: ObservableObject {
         isBoardSynchronized = false
         clearStockfishHints()
         activeHintSummary = ""
-        gameStatus = hasActiveGame
-            ? "Conecta el tablero para continuar la partida."
-            : idleGameStatus
+        if hasActiveGame {
+            prepareScreenTurn()
+        } else {
+            gameStatus = idleGameStatus
+        }
+    }
+}
+
+extension BoardController {
+    func screenHintPattern(for notation: String) -> LEDPattern? {
+        screenHints.first(where: { $0.square.notation == notation })?.pattern
+    }
+
+    func handleScreenSquareTap(_ notation: String) {
+        guard !isConnected,
+              hasActiveGame,
+              !gameSession.isFinished,
+              !isEngineTurn,
+              screenPromotionRequest == nil
+        else { return }
+
+        let square = Square(notation)
+
+        if let selected = liftedSquare.map(Square.init), selected == square {
+            clearScreenInteraction()
+            gameStatus = "Selección cancelada. Turno de \(sideToMoveLabel.lowercased())."
+            return
+        }
+
+        if let selected = liftedSquare.map(Square.init),
+           legalTargets.contains(notation) {
+            performScreenMove(from: selected, to: square)
+            return
+        }
+
+        selectScreenSource(square)
+    }
+
+    func handleScreenMove(from sourceNotation: String, to targetNotation: String) {
+        guard !isConnected,
+              hasActiveGame,
+              !gameSession.isFinished,
+              !isEngineTurn,
+              screenPromotionRequest == nil,
+              sourceNotation != targetNotation
+        else { return }
+
+        let source = Square(sourceNotation)
+        let target = Square(targetNotation)
+        guard isSelectableScreenPiece(at: source) else { return }
+        let targets = gameSession.board.legalMoves(forPieceAt: source)
+        guard targets.contains(target) else {
+            selectScreenSource(source)
+            return
+        }
+        performScreenMove(from: source, to: target)
+    }
+
+    func completeScreenPromotion(_ choice: ScreenPromotionChoice) {
+        guard !isConnected,
+              let request = screenPromotionRequest,
+              hasActiveGame,
+              !gameSession.isFinished
+        else { return }
+
+        performScreenMove(
+            from: request.from,
+            to: request.to,
+            promotion: choice.pieceKind
+        )
+    }
+
+    func cancelScreenPromotion() {
+        guard screenPromotionRequest != nil else { return }
+        screenPromotionRequest = nil
+        clearScreenInteraction()
+        gameStatus = "Promoción cancelada. Elige de nuevo la pieza que quieres mover."
+    }
+
+    private func prepareScreenTurn() {
+        guard !isConnected, hasActiveGame, !gameSession.isFinished else { return }
+
+        clearScreenInteraction()
+        screenPromotionRequest = nil
+
+        if !gameSession.isSynchronized {
+            _ = gameSession.process(physicalPlacement: gameSession.logicalPlacement)
+            publishGameState()
+        }
+
+        if isEngineTurn {
+            scheduleScreenEngineMoveIfNeeded()
+        } else {
+            gameStatus = moveCount == 0
+                ? "Tablero Chessnut desconectado. Juega directamente en el tablero de la pantalla."
+                : "Turno de \(sideToMoveLabel.lowercased()). Juega directamente en la pantalla."
+            scheduleStockfishPrewarmIfNeeded()
+        }
+    }
+
+    private func isSelectableScreenPiece(at square: Square) -> Bool {
+        gameSession.board.position.pieces.contains {
+            $0.square == square && $0.color == gameSession.sideToMove
+        }
+    }
+
+    private func selectScreenSource(_ source: Square) {
+        guard isSelectableScreenPiece(at: source) else {
+            clearScreenInteraction()
+            return
+        }
+
+        invalidateTransientAssistance(turnOffLEDs: false)
+        let targets = gameSession.board.legalMoves(forPieceAt: source)
+        liftedSquare = source.notation
+        legalTargets = targets.map(\.notation).sorted()
+
+        guard !targets.isEmpty else {
+            gameStatus = "\(source.notation) no tiene movimientos legales."
+            return
+        }
+
+        refreshScreenAssistanceIfNeeded()
+    }
+
+    private func clearScreenInteraction() {
+        invalidateTransientAssistance(turnOffLEDs: false)
+        liftedSquare = nil
+        legalTargets = []
+        screenHints = []
+    }
+
+    private func refreshScreenAssistanceIfNeeded() {
+        guard !isConnected,
+              hasActiveGame,
+              !gameSession.isFinished,
+              !isEngineTurn,
+              let sourceNotation = liftedSquare,
+              !legalTargets.isEmpty
+        else { return }
+
+        coachingTask?.cancel()
+        coachingTask = nil
+        clearStockfishHints()
+        screenHints = []
+        activeHintSummary = ""
+
+        let source = Square(sourceNotation)
+        let targets = legalTargets.map(Square.init)
+        let mode = assistanceSettings.mode(for: gameSession.sideToMove)
+
+        switch mode {
+        case .off:
+            gameStatus = "Pieza seleccionada en \(source.notation). Ayuda desactivada para \(sideToMoveLabel.lowercased())."
+
+        case .legalMoves:
+            let hints = AssistanceHintPlanner.hints(for: targets, mode: mode)
+            screenHints = hints
+            activeHintSummary = hintSummary(hints)
+            gameStatus = "Pieza seleccionada en \(source.notation). Puntos verdes fijos = destinos legales."
+
+        case .stockfishQuality, .blunders:
+            activeHintSummary = "Stockfish 18 analizando \(source.notation)…"
+            gameStatus = "Pieza seleccionada en \(source.notation). Stockfish 18 está valorando sus destinos…"
+            startScreenStockfishCoaching(
+                source: source,
+                legalTargets: targets,
+                mode: mode
+            )
+        }
+    }
+
+    private func startScreenStockfishCoaching(
+        source: Square,
+        legalTargets: [Square],
+        mode: AssistanceMode
+    ) {
+        coachingTask?.cancel()
+        clearStockfishHints()
+
+        let fen = logicalFEN
+        let coach = stockfishCoach
+        let generation = assistanceGeneration
+
+        coachingTask = Task { [weak self] in
+            do {
+                let result = try await coach.evaluate(
+                    fen: fen,
+                    source: source,
+                    legalTargets: legalTargets
+                )
+                try Task.checkCancellation()
+                guard let self else { return }
+                guard !self.isConnected,
+                      self.hasActiveGame,
+                      self.assistanceGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.liftedSquare == source.notation,
+                      self.assistanceSettings.mode(for: self.gameSession.sideToMove) == mode,
+                      mode.requiresStockfishAnalysis
+                else { return }
+
+                self.currentStockfishHints = result.hints
+                self.currentStockfishHintFEN = fen
+                self.currentStockfishHintSource = source
+                self.screenHints = result.hints.compactMap { $0.ledHint(for: mode) }
+                self.activeHintSummary = self.stockfishHintSummary(result.hints, mode: mode)
+                self.gameStatus = self.stockfishCoachingStatus(for: mode)
+            } catch is CancellationError {
+                // The selection changed or a newer analysis superseded this one.
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                guard !self.isConnected,
+                      self.hasActiveGame,
+                      self.assistanceGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.liftedSquare == source.notation
+                else { return }
+
+                self.clearStockfishHints()
+                self.screenHints = []
+                self.activeHintSummary = ""
+                self.gameStatus = "No se pudo analizar \(source.notation) con Stockfish 18: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func performScreenMove(
+        from source: Square,
+        to target: Square,
+        promotion: Piece.Kind? = nil,
+        requiredMove: OTBExpectedMove? = nil
+    ) {
+        guard !isConnected,
+              hasActiveGame,
+              !gameSession.isFinished
+        else { return }
+
+        let wasEngineTurn = isEngineTurn
+        var candidate = gameSession.board
+        guard candidate.move(pieceAt: source, to: target) != nil else {
+            gameStatus = "El movimiento \(source.notation)→\(target.notation) no es legal."
+            return
+        }
+
+        if case let .promotion(promotionMove) = candidate.state {
+            let promotionKind = promotion ?? requiredMove?.promotion
+            guard let promotionKind else {
+                screenPromotionRequest = ScreenPromotionRequest(from: source, to: target)
+                gameStatus = "Elige la pieza para promocionar el peón en \(target.notation)."
+                return
+            }
+            _ = candidate.completePromotion(of: promotionMove, to: promotionKind)
+        }
+
+        invalidateTransientAssistance(turnOffLEDs: false)
+        screenPromotionRequest = nil
+
+        let event = gameSession.process(
+            physicalPlacement: candidate.position.fen,
+            requiredMove: requiredMove
+        )
+
+        publishGameState()
+
+        switch event {
+        case let .moveCompleted(move):
+            if wasEngineTurn {
+                engineSuggestion = nil
+            }
+            persistCurrentGameIfNeeded()
+
+            if gameSession.isFinished {
+                returnToIdleState()
+                return
+            }
+
+            gameStatus = "Registrado \(move.san) (\(move.coordinateNotation)). Turno de \(sideToMoveLabel.lowercased())."
+            prepareScreenTurn()
+
+        case let .promotionRequired(square, _):
+            gameStatus = "Elige la pieza para promocionar en \(square.notation)."
+
+        case let .invalid(message), let .intermediate(message):
+            gameStatus = message
+
+        case .synchronized:
+            prepareScreenTurn()
+
+        case let .moveUndone(move):
+            persistAfterUndo()
+            gameStatus = "Jugada \(move.san) deshecha. Turno de \(sideToMoveLabel.lowercased())."
+            prepareScreenTurn()
+
+        case .pieceLifted:
+            break
+        }
+    }
+
+    private func scheduleScreenEngineMoveIfNeeded() {
+        guard !isConnected,
+              isEngineTurn,
+              engineMoveTask == nil
+        else { return }
+
+        if let suggestion = engineSuggestion {
+            gameStatus = "Stockfish juega \(suggestion.displayText) automáticamente en la pantalla."
+            performScreenMove(
+                from: suggestion.move.from,
+                to: suggestion.move.to,
+                promotion: suggestion.move.promotion,
+                requiredMove: suggestion.move
+            )
+            return
+        }
+
+        engineMoveGeneration += 1
+        let generation = engineMoveGeneration
+        let fen = logicalFEN
+        let strength = gameSession.gameRecord.engineStrength ?? .full
+        isEngineThinking = true
+        gameStatus = "Stockfish está calculando su jugada (\(strength.displayText))…"
+
+        engineMoveTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.engineMoveGeneration == generation {
+                    self.engineMoveTask = nil
+                    self.isEngineThinking = false
+                }
+            }
+
+            do {
+                let analysis = try await StockfishEngine.shared.analyze(
+                    fen: fen,
+                    nodeLimit: 80_000,
+                    strength: strength
+                )
+                try Task.checkCancellation()
+                guard !self.isConnected,
+                      self.engineMoveGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.isEngineTurn,
+                      let expectedMove = OTBExpectedMove(uci: analysis.bestMove)
+                else { return }
+
+                let suggestion = SoloEngineSuggestion(
+                    move: expectedMove,
+                    evaluation: analysis.score
+                )
+                self.engineSuggestion = suggestion
+                self.gameStatus = "Stockfish juega \(suggestion.displayText) automáticamente en la pantalla."
+                self.performScreenMove(
+                    from: expectedMove.from,
+                    to: expectedMove.to,
+                    promotion: expectedMove.promotion,
+                    requiredMove: expectedMove
+                )
+            } catch is CancellationError {
+                // A new game, reconnection or completed move superseded this search.
+            } catch {
+                guard self.engineMoveGeneration == generation else { return }
+                self.gameStatus = "No se pudo obtener la jugada de Stockfish: \(error.localizedDescription)"
+            }
+        }
     }
 }
