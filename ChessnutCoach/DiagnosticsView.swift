@@ -183,11 +183,14 @@ final class ArchivedGameAnalysisController: ObservableObject {
         let score = Position(fen: fen)?.sideToMove == .black
             ? analysis.score.inverted
             : analysis.score
+        let bestMove = analysis.bestMove.isEmpty
+            ? "Fin de partida"
+            : ChessMoveNotation.san(forUCI: analysis.bestMove, inFEN: fen) ?? analysis.bestMove
 
         return ArchivedPositionAnalysis(
             ply: ply,
             evaluation: whiteEvaluation(from: score),
-            bestMove: analysis.bestMove.isEmpty ? "Fin de partida" : analysis.bestMove,
+            bestMove: bestMove,
             depth: analysis.depth,
             nodes: analysis.nodes
         )
