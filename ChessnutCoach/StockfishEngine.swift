@@ -139,7 +139,11 @@ actor StockfishEngine {
         String(cString: CCStockfishVersion())
     }
 
-    func analyze(fen: String, nodeLimit: UInt64? = nil) throws -> StockfishAnalysis {
+    func analyze(
+        fen: String,
+        nodeLimit: UInt64? = nil,
+        strength: StockfishStrength = .full
+    ) throws -> StockfishAnalysis {
         let requestedFEN = fen.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !requestedFEN.isEmpty, Position(fen: requestedFEN) != nil else {
             throw StockfishEngineError.search("FEN no válida. Corrige la posición antes de analizar.")
@@ -162,6 +166,7 @@ actor StockfishEngine {
                         fenPointer,
                         nodeLimit ?? defaultNodeLimit,
                         0,
+                        Int32(strength.elo ?? 0),
                         &scoreKind,
                         &scoreValue,
                         &depth,

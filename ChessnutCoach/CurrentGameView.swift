@@ -10,6 +10,7 @@ struct CurrentGameView: View {
     @ObservedObject var board: BoardController
     @State private var finishAction: FinishAction?
     @State private var isFinishDialogPresented = false
+    @State private var isNewGamePresented = false
 
     var body: some View {
         NavigationStack {
@@ -30,6 +31,11 @@ struct CurrentGameView: View {
                 titleVisibility: .visible
             ) {
                 finishDialogButtons
+            }
+            .sheet(isPresented: $isNewGamePresented) {
+                NewGameSetupView { configuration in
+                    board.newGame(configuration: configuration)
+                }
             }
         }
     }
@@ -89,12 +95,28 @@ struct CurrentGameView: View {
                     symbolColor: .white,
                     selection: whitePlayerBinding
                 )
+                .disabled(board.isSoloGame && board.humanSide == .black)
                 Divider()
                 playerField(
                     title: "Negras",
                     symbolColor: .black,
                     selection: blackPlayerBinding
                 )
+                .disabled(board.isSoloGame && board.humanSide == .white)
+            }
+
+            if board.isSoloGame {
+                HStack {
+                    StatusPill(
+                        text: "Solitario · \(board.humanSide?.displayText ?? "—")",
+                        systemImage: "person.fill",
+                        color: .coachAccent
+                    )
+                    Spacer()
+                    Text(board.engineStrength?.displayText ?? "Stockfish")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             HStack(spacing: 8) {
@@ -131,8 +153,26 @@ struct CurrentGameView: View {
                 .foregroundStyle(.orange)
             }
 
+            if board.isEngineThinking {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Stockfish está pensando…")
+                        .font(.subheadline.weight(.medium))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let suggestion = board.engineSuggestion {
+                Label(
+                    "Jugada de Stockfish: \(suggestion.displayText)",
+                    systemImage: "cpu"
+                )
+                .font(.headline)
+                .foregroundStyle(Color.coachAccent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("Jugada de Stockfish, de \(suggestion.move.from.notation) a \(suggestion.move.to.notation)")
+            }
+
             Button {
-                board.newGame()
+                isNewGamePresented = true
             } label: {
                 Label("Nueva partida", systemImage: "plus.circle.fill")
                     .frame(maxWidth: .infinity)
@@ -167,6 +207,7 @@ struct CurrentGameView: View {
                 mode: board.whiteAssistanceMode,
                 selection: whiteAssistanceBinding
             )
+            .disabled(board.isSoloGame && board.humanSide == .black)
 
             Divider()
 
@@ -175,6 +216,7 @@ struct CurrentGameView: View {
                 mode: board.blackAssistanceMode,
                 selection: blackAssistanceBinding
             )
+            .disabled(board.isSoloGame && board.humanSide == .white)
 
             if !board.activeHintSummary.isEmpty {
                 Label(board.activeHintSummary, systemImage: "light.beacon.max")
@@ -330,7 +372,9 @@ struct CurrentGameView: View {
     private var finishDialogTitle: String {
         switch finishAction {
         case .resign:
-            "¿Confirmar que \(board.sideToMoveLabel.lowercased()) abandonan?"
+            board.isSoloGame
+                ? "¿Confirmar que abandonas la partida?"
+                : "¿Confirmar que \(board.sideToMoveLabel.lowercased()) abandonan?"
         case .draw:
             "¿Confirmar tablas por acuerdo?"
         case .abort:
@@ -352,6 +396,94 @@ struct CurrentGameView: View {
         case 26...: "battery.50percent"
         case 11...: "battery.25percent"
         default: "battery.0percent"
+        }
+    }
+}
+
+private struct NewGameSetupView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var mode = GameMode.twoPlayer
+    @State private var humanSide = PlayerSide.white
+    @State private var elo = 1_600.0
+    @State private var useFullStrength = false
+
+    let onStart: (NewGameConfiguration) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Modo") {
+                    Picker("Tipo de partida", selection: $mode) {
+                        ForEach(GameMode.allCases) { mode in
+                            Text(mode.displayText).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if mode == .solo {
+                        Picker("Jugar con", selection: $humanSide) {
+                            ForEach(PlayerSide.allCases) { side in
+                                Text(side.displayText).tag(side)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                if mode == .solo {
+                    Section("Nivel de Stockfish") {
+                        Toggle("Máxima potencia", isOn: $useFullStrength)
+
+                        if !useFullStrength {
+                            Slider(
+                                value: $elo,
+                                in: Double(StockfishStrength.minimumElo)...Double(StockfishStrength.maximumElo),
+                                step: 10
+                            )
+                            LabeledContent("Nivel", value: "Elo \(Int(elo))")
+                        } else {
+                            Text("Stockfish jugará sin limitación Elo.")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text("El rango Elo disponible es el expuesto por Stockfish 18 (1320–3190), además de su fuerza máxima.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section {
+                        Label(
+                            humanSide == .black
+                                ? "Stockfish moverá primero. La app mostrará la jugada y la iluminará en el tablero."
+                                : "Después de cada jugada tuya, la app mostrará e iluminará la respuesta de Stockfish.",
+                            systemImage: "lightbulb.max"
+                        )
+                        .font(.footnote)
+                    }
+                }
+            }
+            .navigationTitle("Nueva partida")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Empezar") {
+                        onStart(
+                            NewGameConfiguration(
+                                mode: mode,
+                                humanSide: humanSide,
+                                strength: useFullStrength
+                                    ? .full
+                                    : StockfishStrength(elo: Int(elo))
+                            )
+                        )
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
         }
     }
 }

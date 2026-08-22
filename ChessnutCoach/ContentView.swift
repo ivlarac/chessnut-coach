@@ -17,11 +17,6 @@ struct ContentView: View {
             .tabItem {
                 Label("Partidas", systemImage: "books.vertical.fill")
             }
-
-            DiagnosticsView(board: board)
-                .tabItem {
-                    Label("Diagnóstico", systemImage: "stethoscope")
-                }
         }
         .tint(.coachAccent)
     }

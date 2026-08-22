@@ -51,6 +51,87 @@ enum GameLifecycleStatus: String, Codable, Sendable {
     case aborted
 }
 
+enum GameMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case twoPlayer
+    case solo
+
+    var id: String { rawValue }
+
+    var displayText: String {
+        switch self {
+        case .twoPlayer: "Dos jugadores"
+        case .solo: "En solitario"
+        }
+    }
+}
+
+enum PlayerSide: String, Codable, CaseIterable, Identifiable, Sendable {
+    case white
+    case black
+
+    var id: String { rawValue }
+    var pieceColor: Piece.Color { self == .white ? .white : .black }
+    var displayText: String { self == .white ? "Blancas" : "Negras" }
+}
+
+enum MoveParticipant: String, Codable, Sendable {
+    case player
+    case human
+    case engine
+}
+
+struct StockfishStrength: Equatable, Codable, Sendable {
+    static let minimumElo = 1_320
+    static let maximumElo = 3_190
+    static let full = StockfishStrength(elo: nil)
+
+    /// `nil` disables UCI_LimitStrength and lets Stockfish use full strength.
+    let elo: Int?
+
+    init(elo: Int?) {
+        self.elo = elo.map { min(max($0, Self.minimumElo), Self.maximumElo) }
+    }
+
+    var displayText: String {
+        elo.map { "Elo \($0)" } ?? "Máxima"
+    }
+}
+
+struct NewGameConfiguration: Equatable, Sendable {
+    var mode: GameMode = .twoPlayer
+    var humanSide: PlayerSide = .white
+    var strength: StockfishStrength = StockfishStrength(elo: 1_600)
+}
+
+enum WhitePositionEvaluation: Equatable, Sendable {
+    case centipawns(Int)
+    case mate(Int)
+    case tablebase(Int)
+
+    /// Portion of the vertical evaluation bar occupied by White.
+    var whiteShare: Double {
+        switch self {
+        case let .centipawns(value):
+            return 0.5 + 0.5 * tanh(Double(value) / 400.0)
+        case let .mate(value), let .tablebase(value):
+            return value >= 0 ? 1 : 0
+        }
+    }
+
+    var displayText: String {
+        switch self {
+        case let .centipawns(value):
+            return String(format: "%+.2f", Double(value) / 100.0)
+                .replacingOccurrences(of: ".", with: ",")
+        case let .mate(plies):
+            let moves = max(1, (abs(plies) + 1) / 2)
+            return plies >= 0 ? "#\(moves)" : "#-\(moves)"
+        case let .tablebase(value):
+            return value >= 0 ? "TB+" : "TB-"
+        }
+    }
+}
+
 enum GameEndReason: String, Codable, Sendable {
     case checkmate
     case resignation
@@ -129,6 +210,7 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
     let fenAfter: String
     let playedAt: Date
     let promotion: String?
+    let participant: MoveParticipant?
 
     init(
         id: UUID = UUID(),
@@ -140,7 +222,8 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
         fenBefore: String,
         fenAfter: String,
         playedAt: Date = Date(),
-        promotion: String? = nil
+        promotion: String? = nil,
+        participant: MoveParticipant? = nil
     ) {
         self.id = id
         self.ply = ply
@@ -152,6 +235,7 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
         self.fenAfter = fenAfter
         self.playedAt = playedAt
         self.promotion = promotion
+        self.participant = participant
     }
 }
 
@@ -165,6 +249,10 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
     var moves: [GameMoveRecord]
     var status: GameLifecycleStatus
     var result: GameResult
+    var mode: GameMode
+    var humanSide: PlayerSide?
+    var engineStrength: StockfishStrength?
+    var engineName: String?
 
     init(
         id: UUID = UUID(),
@@ -175,7 +263,11 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         endedAt: Date? = nil,
         moves: [GameMoveRecord] = [],
         status: GameLifecycleStatus = .playing,
-        result: GameResult = .unfinished
+        result: GameResult = .unfinished,
+        mode: GameMode = .twoPlayer,
+        humanSide: PlayerSide? = nil,
+        engineStrength: StockfishStrength? = nil,
+        engineName: String? = nil
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -186,6 +278,10 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         self.moves = moves
         self.status = status
         self.result = result
+        self.mode = mode
+        self.humanSide = humanSide
+        self.engineStrength = engineStrength
+        self.engineName = engineName
     }
 
     var moveCount: Int { moves.count }
@@ -209,6 +305,10 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         case moves
         case status
         case result
+        case mode
+        case humanSide
+        case engineStrength
+        case engineName
     }
 
     init(from decoder: Decoder) throws {
@@ -222,6 +322,10 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         moves = try container.decode([GameMoveRecord].self, forKey: .moves)
         status = try container.decode(GameLifecycleStatus.self, forKey: .status)
         result = try container.decode(GameResult.self, forKey: .result)
+        mode = try container.decodeIfPresent(GameMode.self, forKey: .mode) ?? .twoPlayer
+        humanSide = try container.decodeIfPresent(PlayerSide.self, forKey: .humanSide)
+        engineStrength = try container.decodeIfPresent(StockfishStrength.self, forKey: .engineStrength)
+        engineName = try container.decodeIfPresent(String.self, forKey: .engineName)
     }
 }
 
