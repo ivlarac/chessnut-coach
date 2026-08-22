@@ -474,6 +474,14 @@ private struct NewGameSetupView: View {
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                        Divider()
+
+                        Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
+
+                        Text("Podrás deshacer desde el iPhone o devolviendo físicamente la última jugada a la posición anterior.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -548,14 +556,6 @@ private struct NewGameSetupView: View {
                             title: "Negras",
                             selection: $blackAssistance
                         )
-                    }
-
-                    Section("Deshacer jugadas") {
-                        Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
-
-                        Text("Si está activado, podrás deshacer desde el iPhone o devolviendo físicamente la última jugada a la posición anterior.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
