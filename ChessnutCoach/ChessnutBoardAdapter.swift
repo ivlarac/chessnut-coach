@@ -1,7 +1,7 @@
 import EasyLinkSwiftSDK
 import Foundation
 
-struct ChessnutBoardDiscovery: ElectronicChessBoardDiscovery {
+struct ChessnutEasyLinkBoardDiscovery: ElectronicChessBoardDiscovery {
     func scan() -> AsyncStream<ElectronicBoardDescriptor> {
         AsyncStream { continuation in
             let task = Task {
@@ -65,8 +65,19 @@ struct ChessnutBoardAdapterFactory: ElectronicBoardAdapterFactory {
 }
 
 extension ElectronicBoardAdapterRegistry {
+    static var appDefault: Self {
+        Self(
+            factories: [
+                ChessnutBoardAdapterFactory(),
+                ChessUpBoardAdapterFactory(),
+            ]
+        )
+    }
+
+    // Kept so existing dependency-injection call sites remain source-compatible.
+    // The application's default registry is now deliberately multi-vendor.
     static var chessnutDefault: Self {
-        Self(factories: [ChessnutBoardAdapterFactory()])
+        appDefault
     }
 }
 
