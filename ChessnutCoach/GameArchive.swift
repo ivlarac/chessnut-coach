@@ -32,7 +32,7 @@ enum ChessBoardPerspective: Equatable, Sendable {
         precondition((0..<8).contains(displayRankIndex))
         precondition((0..<8).contains(displayFileIndex))
 
-        switch self {
+        return switch self {
         case .whiteAtBottom:
             ChessBoardSquarePosition(
                 rankIndex: displayRankIndex,
