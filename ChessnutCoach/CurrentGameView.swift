@@ -332,8 +332,8 @@ struct CurrentGameView: View {
             Picker("Ayuda para \(title.lowercased())", selection: selection) {
                 Text("No").tag(AssistanceMode.off)
                 Text("Legales").tag(AssistanceMode.legalMoves)
+                Text("Blunder").tag(AssistanceMode.blunders)
                 Text("Calidad").tag(AssistanceMode.stockfishQuality)
-                Text("Blunders").tag(AssistanceMode.blunders)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -616,8 +616,8 @@ private struct NewGameSetupView: View {
             Picker(title, selection: selection) {
                 Text("No").tag(AssistanceMode.off)
                 Text("Legales").tag(AssistanceMode.legalMoves)
+                Text("Blunder").tag(AssistanceMode.blunders)
                 Text("Calidad").tag(AssistanceMode.stockfishQuality)
-                Text("Blunders").tag(AssistanceMode.blunders)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
