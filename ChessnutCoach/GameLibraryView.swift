@@ -192,7 +192,7 @@ struct GameDetailView: View {
 
                 Stepper(value: $selectedPly, in: 0...game.moves.count) {
                     if let move = GameReplay.move(for: game, atPly: selectedPly) {
-                        Text("\(move.ply). \(move.san) · \(move.from)–\(move.to)")
+                        Text(savedMoveNotation(for: move))
                     } else {
                         Text("Posición inicial")
                     }
@@ -287,12 +287,12 @@ struct GameDetailView: View {
                     Text("No hay movimientos registrados.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(game.moves) { move in
-                        Button {
-                            selectedPly = move.ply
-                        } label: {
-                            GameMoveRow(move: move, isSelected: selectedPly == move.ply)
-                        }
+                    ForEach(savedMoveRows) { row in
+                        GameMoveRow(
+                            row: row,
+                            selectedPly: selectedPly,
+                            selectMove: { selectedPly = $0 }
+                        )
                     }
                 }
             }
@@ -358,24 +358,90 @@ struct GameDetailView: View {
     private var replayFEN: String {
         GameReplay.fen(for: game, afterPly: selectedPly)
     }
+
+    private var savedMoveRows: [SavedMoveRow] {
+        var rows: [SavedMoveRow] = []
+
+        for move in game.moves {
+            let notation = moveNotationComponents(for: move)
+
+            if let lastIndex = rows.indices.last,
+               rows[lastIndex].moveNumber == notation.moveNumber {
+                if notation.isWhiteMove {
+                    rows[lastIndex].whiteMove = move
+                } else {
+                    rows[lastIndex].blackMove = move
+                }
+            } else {
+                rows.append(
+                    SavedMoveRow(
+                        id: move.id,
+                        moveNumber: notation.moveNumber,
+                        whiteMove: notation.isWhiteMove ? move : nil,
+                        blackMove: notation.isWhiteMove ? nil : move
+                    )
+                )
+            }
+        }
+
+        return rows
+    }
+
+    private func savedMoveNotation(for move: GameMoveRecord) -> String {
+        let notation = moveNotationComponents(for: move)
+        let prefix = notation.isWhiteMove ? "\(notation.moveNumber)." : "\(notation.moveNumber)..."
+        return "\(prefix) \(move.san)"
+    }
+
+    private func moveNotationComponents(for move: GameMoveRecord) -> (moveNumber: Int, isWhiteMove: Bool) {
+        let fields = move.fenBefore.split(separator: " ")
+        let fallbackMoveNumber = max(1, (move.ply + 1) / 2)
+        let moveNumber = fields.count > 5 ? Int(fields[5]) ?? fallbackMoveNumber : fallbackMoveNumber
+        let isWhiteMove = fields.count > 1 ? fields[1] != "b" : !move.ply.isMultiple(of: 2)
+        return (moveNumber, isWhiteMove)
+    }
+}
+
+private struct SavedMoveRow: Identifiable {
+    let id: UUID
+    let moveNumber: Int
+    var whiteMove: GameMoveRecord?
+    var blackMove: GameMoveRecord?
 }
 
 private struct GameMoveRow: View {
-    let move: GameMoveRecord
-    let isSelected: Bool
+    let row: SavedMoveRow
+    let selectedPly: Int
+    let selectMove: (Int) -> Void
 
     var body: some View {
-        HStack {
-            Text(String(move.ply) + ".")
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(row.whiteMove == nil ? "\(row.moveNumber)..." : "\(row.moveNumber).")
+                .frame(width: 36, alignment: .trailing)
                 .foregroundStyle(.secondary)
-            Text(move.san)
-                .font(.body.monospaced())
-            Spacer()
-            Text(move.from + "–" + move.to)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
+
+            moveCell(row.whiteMove)
+            moveCell(row.blackMove)
         }
-        .foregroundColor(isSelected ? .accentColor : .primary)
+    }
+
+    @ViewBuilder
+    private func moveCell(_ move: GameMoveRecord?) -> some View {
+        if let move {
+            Button {
+                selectMove(move.ply)
+            } label: {
+                Text(move.san)
+                    .font(.body.monospaced())
+                    .foregroundColor(selectedPly == move.ply ? .accentColor : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            Text("")
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
