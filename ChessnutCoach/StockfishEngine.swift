@@ -86,15 +86,23 @@ struct StockfishMoveHint: Equatable, Sendable {
     let moverScore: StockfishScore
     let centipawnLoss: Int?
 
-    var ledHint: LEDHint {
-        LEDHint(square: square, pattern: quality.ledPattern)
+    func ledHint(for mode: AssistanceMode) -> LEDHint? {
+        guard let pattern = mode.ledPattern(for: quality) else { return nil }
+        return LEDHint(square: square, pattern: pattern)
     }
 
-    var detailText: String {
-        if let centipawnLoss {
-            return "\(square.notation) \(quality.ledPattern.displayText)/\(quality.displayText) (−\(centipawnLoss) cp)"
+    func detailText(for mode: AssistanceMode) -> String {
+        let pattern = mode.ledPattern(for: quality) ?? quality.ledPattern
+
+        if mode == .blunders {
+            let label = quality == .blunder ? "blunder" : "legal"
+            return "\(square.notation) \(pattern.displayText)/\(label)"
         }
-        return "\(square.notation) \(quality.ledPattern.displayText)/\(quality.displayText)"
+
+        if let centipawnLoss {
+            return "\(square.notation) \(pattern.displayText)/\(quality.displayText) (−\(centipawnLoss) cp)"
+        }
+        return "\(square.notation) \(pattern.displayText)/\(quality.displayText)"
     }
 }
 

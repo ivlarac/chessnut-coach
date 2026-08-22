@@ -229,6 +229,7 @@ enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case off
     case legalMoves
     case stockfishQuality
+    case blunders
 
     var id: String { rawValue }
 
@@ -240,6 +241,8 @@ enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
             "Movimientos legales"
         case .stockfishQuality:
             "Calidad Stockfish"
+        case .blunders:
+            "Aviso de blunders"
         }
     }
 
@@ -251,6 +254,30 @@ enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
             "Ilumina todos los destinos legales de forma fija."
         case .stockfishQuality:
             "Stockfish 18 compara cada destino con la mejor jugada de la posición: fijo = bueno, lento = aceptable, rápido = blunder."
+        case .blunders:
+            "Todos los destinos legales permanecen fijos, salvo los blunders, que parpadean rápido."
+        }
+    }
+
+    var requiresStockfishAnalysis: Bool {
+        switch self {
+        case .stockfishQuality, .blunders:
+            true
+        case .off, .legalMoves:
+            false
+        }
+    }
+
+    func ledPattern(for quality: MoveQuality) -> LEDPattern? {
+        switch self {
+        case .off:
+            nil
+        case .legalMoves:
+            .steady
+        case .stockfishQuality:
+            quality.ledPattern
+        case .blunders:
+            quality == .blunder ? .fastBlink : .steady
         }
     }
 }
@@ -348,7 +375,7 @@ enum AssistanceHintPlanner {
         let sortedTargets = legalTargets.sorted { $0.notation < $1.notation }
 
         switch mode {
-        case .off, .stockfishQuality:
+        case .off, .stockfishQuality, .blunders:
             return []
         case .legalMoves:
             return sortedTargets.map { LEDHint(square: $0, pattern: .steady) }

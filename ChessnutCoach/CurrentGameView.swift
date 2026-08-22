@@ -265,6 +265,7 @@ struct CurrentGameView: View {
                 Text("No").tag(AssistanceMode.off)
                 Text("Legales").tag(AssistanceMode.legalMoves)
                 Text("Calidad").tag(AssistanceMode.stockfishQuality)
+                Text("Blunders").tag(AssistanceMode.blunders)
             }
             .pickerStyle(.segmented)
             .labelsHidden()

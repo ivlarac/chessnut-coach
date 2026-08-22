@@ -22,6 +22,7 @@ La fase 5 conecta **Stockfish 18** con la ayuda física del Chessnut Air:
 - pérdida de hasta 50 centipeones: **bueno → LED fijo**;
 - pérdida de 51 a 200 centipeones: **aceptable → parpadeo lento**;
 - pérdida superior a 200 centipeones: **blunder → parpadeo rápido**;
+- el modo **Blunders** conserva fijos todos los destinos buenos o aceptables y sólo hace parpadear rápido los errores graves;
 - si se devuelve o mueve la pieza mientras Stockfish analiza, el resultado anterior se descarta y no puede encender LEDs atrasados;
 - en una promoción se analizan dama, torre, alfil y caballo y la casilla utiliza la valoración de la mejor promoción;
 - el diagnóstico y el coaching comparten una única instancia del motor para no duplicar Stockfish y sus redes NNUE en memoria.
@@ -93,7 +94,8 @@ Blancas y negras se configuran de forma independiente:
 
 - **No**: no ilumina destinos;
 - **Legales**: todos los destinos legales permanecen fijos;
-- **Calidad**: Stockfish 18 valora cada destino y decide el patrón LED.
+- **Calidad**: Stockfish 18 distingue bueno, aceptable y blunder con los tres patrones LED;
+- **Blunders**: todos los destinos legales quedan fijos y únicamente los errores graves parpadean rápido.
 
 Por defecto, durante la validación de fase 5:
 
@@ -112,13 +114,15 @@ La referencia es la mejor jugada global encontrada por Stockfish en la posición
 
 Esto implica que si se levanta una pieza cuya mejor continuación sigue siendo mucho peor que la mejor jugada disponible con otra pieza, sus destinos pueden aparecer como aceptables o blunders. Es intencionado: el tablero evalúa la calidad real de la decisión, no sólo cuál es el mejor movimiento de la pieza elegida.
 
+El modo **Blunders** utiliza la misma evaluación y el mismo umbral superior a 200 cp, pero agrupa **Bueno** y **Aceptable** como LED fijo. Así no recomienda una jugada concreta: permite escoger cualquier destino legal y sólo advierte cuando la elección cede una ventaja muy grande, pierde material decisivo o abandona un resultado forzado.
+
 Las posiciones con mate forzado o resultado de tablebase se sitúan fuera de la escala normal de centipeones para que perder una victoria forzada se considere un deterioro decisivo.
 
 ## Latencia y concurrencia
 
 Para reducir el tiempo desde que se levanta una pieza hasta que aparecen las luces:
 
-1. Stockfish precalcula y cachea la evaluación base cuando empieza un turno con ayuda de Calidad.
+1. Stockfish precalcula y cachea la evaluación base cuando empieza un turno con ayuda de Calidad o Blunders.
 2. Al levantar una pieza sólo analiza sus destinos legales.
 3. Los análisis usan límites de nodos pequeños orientados a respuesta rápida en el dispositivo.
 4. Si cambia la posición física mientras el análisis sigue en curso, el resultado se invalida antes de llegar a los LEDs.
@@ -221,6 +225,7 @@ CI:
 - compila la aplicación para iOS Simulator incluyendo el motor C++;
 - ejecuta todos los tests del núcleo OTB;
 - comprueba los umbrales 50/200 cp y su mapeo a fijo/lento/rápido;
+- comprueba que Blunders convierte bueno y aceptable en fijo y conserva únicamente el blunder como parpadeo rápido;
 - verifica que Calidad Stockfish no utiliza pistas simuladas como fallback;
 - verifica las directivas de ciclo `active` / `inactive` / `background`;
 - verifica que la desconexión BLE se reenvía tanto al cliente como al coordinador de reconexión;

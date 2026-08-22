@@ -591,13 +591,14 @@ final class BoardController: ObservableObject {
                         activeHintSummary = hintSummary(hints)
                         startLEDHints(hints, client: client)
 
-                    case .stockfishQuality:
+                    case .stockfishQuality, .blunders:
                         gameStatus = "Pieza levantada en \(source.notation). Stockfish 18 está valorando sus destinos…"
                         activeHintSummary = "Stockfish 18 analizando \(source.notation)…"
                         try await client.setLEDs(.allOff)
                         startStockfishCoaching(
                             source: source,
                             legalTargets: legalTargets,
+                            mode: mode,
                             client: client
                         )
                     }
@@ -636,12 +637,13 @@ final class BoardController: ObservableObject {
                         activeHintSummary = hintSummary(hints)
                         startLEDHints(hints, client: client)
 
-                    case .stockfishQuality:
+                    case .stockfishQuality, .blunders:
                         if currentStockfishHintFEN == logicalFEN,
                            currentStockfishHintSource == gameSession.liftedSquare,
                            !currentStockfishHints.isEmpty {
-                            activeHintSummary = stockfishHintSummary(currentStockfishHints)
-                            startLEDHints(currentStockfishHints.map(\.ledHint), client: client)
+                            let hints = currentStockfishHints.compactMap { $0.ledHint(for: mode) }
+                            activeHintSummary = stockfishHintSummary(currentStockfishHints, mode: mode)
+                            startLEDHints(hints, client: client)
                         } else {
                             try await client.setLEDs(.allOff)
                         }
@@ -684,11 +686,12 @@ final class BoardController: ObservableObject {
             activeHintSummary = hintSummary(hints)
             startLEDHints(hints, client: client)
 
-        case .stockfishQuality:
+        case .stockfishQuality, .blunders:
             activeHintSummary = "Stockfish 18 analizando \(source.notation)…"
             startStockfishCoaching(
                 source: source,
                 legalTargets: gameSession.legalTargets,
+                mode: mode,
                 client: client
             )
         }
@@ -700,7 +703,7 @@ final class BoardController: ObservableObject {
 
         guard !gameSession.isFinished,
               gameSession.liftedSquare == nil,
-              assistanceSettings.mode(for: gameSession.sideToMove) == .stockfishQuality
+              assistanceSettings.mode(for: gameSession.sideToMove).requiresStockfishAnalysis
         else { return }
 
         let fen = logicalFEN
@@ -713,6 +716,7 @@ final class BoardController: ObservableObject {
     private func startStockfishCoaching(
         source: Square,
         legalTargets: [Square],
+        mode: AssistanceMode,
         client: EasyLinkClient
     ) {
         coachingTask?.cancel()
@@ -734,16 +738,18 @@ final class BoardController: ObservableObject {
                 guard self.assistanceGeneration == generation,
                       self.logicalFEN == fen,
                       self.gameSession.liftedSquare == source,
-                      self.assistanceSettings.mode(for: self.gameSession.sideToMove) == .stockfishQuality,
+                      self.assistanceSettings.mode(for: self.gameSession.sideToMove) == mode,
+                      mode.requiresStockfishAnalysis,
                       self.isConnected
                 else { return }
 
                 self.currentStockfishHints = result.hints
                 self.currentStockfishHintFEN = fen
                 self.currentStockfishHintSource = source
-                self.activeHintSummary = self.stockfishHintSummary(result.hints)
-                self.gameStatus = "Stockfish 18: fijo = bueno (≤50 cp), lento = aceptable (≤200 cp), rápido = blunder."
-                self.startLEDHints(result.hints.map(\.ledHint), client: client)
+                let hints = result.hints.compactMap { $0.ledHint(for: mode) }
+                self.activeHintSummary = self.stockfishHintSummary(result.hints, mode: mode)
+                self.gameStatus = self.stockfishCoachingStatus(for: mode)
+                self.startLEDHints(hints, client: client)
             } catch is CancellationError {
                 // The piece was returned/moved or a newer assistance request won.
             } catch {
@@ -824,8 +830,22 @@ final class BoardController: ObservableObject {
             .joined(separator: " · ")
     }
 
-    private func stockfishHintSummary(_ hints: [StockfishMoveHint]) -> String {
-        hints.map(\.detailText).joined(separator: " · ")
+    private func stockfishHintSummary(
+        _ hints: [StockfishMoveHint],
+        mode: AssistanceMode
+    ) -> String {
+        hints.map { $0.detailText(for: mode) }.joined(separator: " · ")
+    }
+
+    private func stockfishCoachingStatus(for mode: AssistanceMode) -> String {
+        switch mode {
+        case .stockfishQuality:
+            "Stockfish 18: fijo = bueno (≤50 cp), lento = aceptable (≤200 cp), rápido = blunder."
+        case .blunders:
+            "Stockfish 18: destinos legales fijos; blunders (>200 cp) parpadean rápido."
+        case .off, .legalMoves:
+            ""
+        }
     }
 
     private func clearStockfishHints() {
