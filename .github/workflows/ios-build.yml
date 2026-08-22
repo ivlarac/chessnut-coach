@@ -1,13 +1,15 @@
-name: iOS Build & Tests
+name: iOS Build, Tests & IPA
 
 on:
   pull_request:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-and-test:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -86,3 +88,69 @@ jobs:
 
       - name: Run game-core unit tests
         run: swift test
+
+  build-ipa:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Cache Stockfish 18 NNUE networks
+        uses: actions/cache@v4
+        with:
+          path: StockfishNetworks
+          key: stockfish18-nnue-c288c895ea92-37f18f62d772
+
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project ChessnutCoach.xcodeproj -scheme ChessnutCoach
+
+      - name: Build unsigned IPA for iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          DERIVED_DATA="$RUNNER_TEMP/ChessnutCoachDerivedData"
+          PACKAGE_DIR="$RUNNER_TEMP/ChessnutCoachIPA"
+
+          xcodebuild \
+            -project ChessnutCoach.xcodeproj \
+            -scheme ChessnutCoach \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP_PATH="$(find "$DERIVED_DATA/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [[ -z "$APP_PATH" ]]; then
+            echo "No .app bundle found after device build" >&2
+            exit 1
+          fi
+
+          rm -rf "$PACKAGE_DIR"
+          mkdir -p "$PACKAGE_DIR/Payload"
+          cp -R "$APP_PATH" "$PACKAGE_DIR/Payload/"
+          (
+            cd "$PACKAGE_DIR"
+            zip -qry "$GITHUB_WORKSPACE/ChessnutCoach.ipa" Payload
+          )
+
+          echo "Created $GITHUB_WORKSPACE/ChessnutCoach.ipa"
+          ls -lh "$GITHUB_WORKSPACE/ChessnutCoach.ipa"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChessnutCoach-IPA
+          path: ChessnutCoach.ipa
+          if-no-files-found: error
+          retention-days: 3

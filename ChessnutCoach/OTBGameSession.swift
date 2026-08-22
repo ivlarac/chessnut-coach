@@ -53,6 +53,7 @@ enum OTBGameEvent: Equatable, Sendable {
     case synchronized
     case pieceLifted(source: Square, legalTargets: [Square])
     case moveCompleted(OTBDetectedMove)
+    case moveUndone(GameMoveRecord)
     case promotionRequired(square: Square, legalKinds: [Piece.Kind])
     case intermediate(String)
     case invalid(String)
@@ -86,6 +87,7 @@ struct OTBGameSession: Sendable {
     private(set) var legalTargets: [Square] = []
     private(set) var lastMove: OTBDetectedMove?
     private(set) var isSynchronized = false
+    private(set) var isAwaitingPhysicalUndo = false
     private var pendingPromotion: PendingPromotion?
 
     init(
@@ -96,7 +98,8 @@ struct OTBGameSession: Sendable {
         mode: GameMode = .twoPlayer,
         humanSide: PlayerSide? = nil,
         engineStrength: StockfishStrength? = nil,
-        engineName: String? = nil
+        engineName: String? = nil,
+        allowUndo: Bool = false
     ) {
         board = Board(position: position)
         gameRecord = GameRecord(
@@ -107,37 +110,14 @@ struct OTBGameSession: Sendable {
             mode: mode,
             humanSide: humanSide,
             engineStrength: engineStrength,
-            engineName: engineName
+            engineName: engineName,
+            allowUndo: mode == .twoPlayer && allowUndo
         )
         applyTerminalBoardStateIfNeeded(at: startedAt)
     }
 
     init(restoring record: GameRecord) throws {
-        guard let position = Position(fen: record.initialFEN) else {
-            throw OTBGameRestoreError.invalidInitialPosition
-        }
-
-        var restoredBoard = Board(position: position)
-        for archivedMove in record.moves.sorted(by: { $0.ply < $1.ply }) {
-            let from = Square(archivedMove.from)
-            let to = Square(archivedMove.to)
-            guard restoredBoard.move(pieceAt: from, to: to) != nil else {
-                throw OTBGameRestoreError.invalidMove(ply: archivedMove.ply)
-            }
-
-            if case let .promotion(promotionMove) = restoredBoard.state {
-                guard let kind = Self.promotionKind(from: archivedMove.promotion) else {
-                    throw OTBGameRestoreError.invalidMove(ply: archivedMove.ply)
-                }
-                _ = restoredBoard.completePromotion(of: promotionMove, to: kind)
-            }
-
-            guard restoredBoard.position.fen == archivedMove.fenAfter else {
-                throw OTBGameRestoreError.positionMismatch(ply: archivedMove.ply)
-            }
-        }
-
-        board = restoredBoard
+        board = try Self.restoredBoard(initialFEN: record.initialFEN, moves: record.moves)
         gameRecord = record
         liftedSquare = nil
         legalTargets = []
@@ -145,6 +125,7 @@ struct OTBGameSession: Sendable {
             OTBDetectedMove(from: Square($0.from), to: Square($0.to), san: $0.san)
         }
         isSynchronized = false
+        isAwaitingPhysicalUndo = false
     }
 
     var logicalPlacement: String {
@@ -171,6 +152,15 @@ struct OTBGameSession: Sendable {
         pendingPromotion != nil
     }
 
+    var canUndoLastMove: Bool {
+        undoFeatureEnabled
+            && gameRecord.status == .playing
+            && !gameRecord.moves.isEmpty
+            && pendingPromotion == nil
+            && !isAwaitingPhysicalUndo
+            && isSynchronized
+    }
+
     mutating func reset(
         startedAt: Date = Date(),
         whitePlayer: String = "Blancas",
@@ -178,7 +168,8 @@ struct OTBGameSession: Sendable {
         mode: GameMode = .twoPlayer,
         humanSide: PlayerSide? = nil,
         engineStrength: StockfishStrength? = nil,
-        engineName: String? = nil
+        engineName: String? = nil,
+        allowUndo: Bool = false
     ) {
         self = OTBGameSession(
             startedAt: startedAt,
@@ -187,13 +178,49 @@ struct OTBGameSession: Sendable {
             mode: mode,
             humanSide: humanSide,
             engineStrength: engineStrength,
-            engineName: engineName
+            engineName: engineName,
+            allowUndo: allowUndo
         )
     }
 
     mutating func updatePlayers(white: String, black: String) {
         gameRecord.whitePlayer = white
         gameRecord.blackPlayer = black
+    }
+
+    @discardableResult
+    mutating func undoLastMove(awaitPhysicalRestore: Bool = true) -> GameMoveRecord? {
+        guard undoFeatureEnabled,
+              gameRecord.status == .playing,
+              pendingPromotion == nil,
+              !isAwaitingPhysicalUndo,
+              let undoneMove = gameRecord.moves.last
+        else { return nil }
+
+        if awaitPhysicalRestore && !isSynchronized {
+            return nil
+        }
+
+        let remainingMoves = Array(gameRecord.moves.dropLast())
+        guard let restoredBoard = try? Self.restoredBoard(
+            initialFEN: gameRecord.initialFEN,
+            moves: remainingMoves
+        ) else { return nil }
+
+        board = restoredBoard
+        gameRecord.moves = remainingMoves
+        gameRecord.status = .playing
+        gameRecord.result = .unfinished
+        gameRecord.endedAt = nil
+        liftedSquare = nil
+        legalTargets = []
+        pendingPromotion = nil
+        lastMove = remainingMoves.last.map {
+            OTBDetectedMove(from: Square($0.from), to: Square($0.to), san: $0.san)
+        }
+        isAwaitingPhysicalUndo = awaitPhysicalRestore
+        isSynchronized = !awaitPhysicalRestore
+        return undoneMove
     }
 
     @discardableResult
@@ -223,6 +250,7 @@ struct OTBGameSession: Sendable {
         liftedSquare = nil
         legalTargets = []
         pendingPromotion = nil
+        isAwaitingPhysicalUndo = false
     }
 
     mutating func process(
@@ -243,11 +271,29 @@ struct OTBGameSession: Sendable {
             return processPendingPromotion(physicalPlacement: physicalPlacement, at: date)
         }
 
+        if isAwaitingPhysicalUndo {
+            if physicalPlacement == logicalPlacement {
+                isAwaitingPhysicalUndo = false
+                isSynchronized = true
+                return .synchronized
+            }
+
+            liftedSquare = nil
+            legalTargets = []
+            isSynchronized = false
+            return .intermediate("Deshacer en curso. Devuelve las piezas a la posición anterior para continuar.")
+        }
+
         if physicalPlacement == logicalPlacement {
             liftedSquare = nil
             legalTargets = []
             isSynchronized = true
             return .synchronized
+        }
+
+        if shouldAutomaticallyUndo(to: physicalPlacement),
+           let undoneMove = undoLastMove(awaitPhysicalRestore: false) {
+            return .moveUndone(undoneMove)
         }
 
         if let transition = matchingLegalTransition(for: physicalPlacement, requiredMove: requiredMove) {
@@ -316,6 +362,20 @@ struct OTBGameSession: Sendable {
         }
 
         return .invalid("La posición física no corresponde todavía a un movimiento legal. Corrige el tablero o completa el movimiento.")
+    }
+
+    private var undoFeatureEnabled: Bool {
+        gameRecord.mode == .twoPlayer && gameRecord.allowUndo
+    }
+
+    private func shouldAutomaticallyUndo(to physicalPlacement: String) -> Bool {
+        guard undoFeatureEnabled,
+              gameRecord.status == .playing,
+              pendingPromotion == nil,
+              let lastMove = gameRecord.moves.last
+        else { return false }
+
+        return physicalPlacement == Self.placementField(from: lastMove.fenBefore)
     }
 
     private mutating func apply(
@@ -413,6 +473,7 @@ struct OTBGameSession: Sendable {
         legalTargets = []
         lastMove = detected
         isSynchronized = true
+        isAwaitingPhysicalUndo = false
         applyTerminalBoardStateIfNeeded(at: playedAt)
         return .moveCompleted(detected)
     }
@@ -490,6 +551,38 @@ struct OTBGameSession: Sendable {
         liftedSquare = nil
         legalTargets = []
         pendingPromotion = nil
+        isAwaitingPhysicalUndo = false
+    }
+
+    private static func restoredBoard(
+        initialFEN: String,
+        moves: [GameMoveRecord]
+    ) throws -> Board {
+        guard let position = Position(fen: initialFEN) else {
+            throw OTBGameRestoreError.invalidInitialPosition
+        }
+
+        var restoredBoard = Board(position: position)
+        for archivedMove in moves.sorted(by: { $0.ply < $1.ply }) {
+            let from = Square(archivedMove.from)
+            let to = Square(archivedMove.to)
+            guard restoredBoard.move(pieceAt: from, to: to) != nil else {
+                throw OTBGameRestoreError.invalidMove(ply: archivedMove.ply)
+            }
+
+            if case let .promotion(promotionMove) = restoredBoard.state {
+                guard let kind = Self.promotionKind(from: archivedMove.promotion) else {
+                    throw OTBGameRestoreError.invalidMove(ply: archivedMove.ply)
+                }
+                _ = restoredBoard.completePromotion(of: promotionMove, to: kind)
+            }
+
+            guard restoredBoard.position.fen == archivedMove.fenAfter else {
+                throw OTBGameRestoreError.positionMismatch(ply: archivedMove.ply)
+            }
+        }
+
+        return restoredBoard
     }
 
     private static func drawReason(from reason: Board.State.DrawReason) -> GameDrawReason {

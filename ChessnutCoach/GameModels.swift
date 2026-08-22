@@ -157,6 +157,7 @@ struct NewGameConfiguration: Equatable, Sendable {
     var humanSide: PlayerSide = .white
     var strength: StockfishStrength = StockfishStrength(level: 4)
     var assistance: AssistanceSettings = AssistanceSettings()
+    var allowUndo: Bool = false
 }
 
 enum WhitePositionEvaluation: Equatable, Sendable {
@@ -309,6 +310,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
     var humanSide: PlayerSide?
     var engineStrength: StockfishStrength?
     var engineName: String?
+    var allowUndo: Bool
 
     init(
         id: UUID = UUID(),
@@ -323,7 +325,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         mode: GameMode = .twoPlayer,
         humanSide: PlayerSide? = nil,
         engineStrength: StockfishStrength? = nil,
-        engineName: String? = nil
+        engineName: String? = nil,
+        allowUndo: Bool = false
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -338,6 +341,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         self.humanSide = humanSide
         self.engineStrength = engineStrength
         self.engineName = engineName
+        self.allowUndo = allowUndo
     }
 
     var moveCount: Int { moves.count }
@@ -365,6 +369,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         case humanSide
         case engineStrength
         case engineName
+        case allowUndo
     }
 
     init(from decoder: Decoder) throws {
@@ -382,6 +387,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         humanSide = try container.decodeIfPresent(PlayerSide.self, forKey: .humanSide)
         engineStrength = try container.decodeIfPresent(StockfishStrength.self, forKey: .engineStrength)
         engineName = try container.decodeIfPresent(String.self, forKey: .engineName)
+        allowUndo = try container.decodeIfPresent(Bool.self, forKey: .allowUndo) ?? false
     }
 }
 
