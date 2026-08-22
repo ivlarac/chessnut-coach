@@ -8,12 +8,13 @@ Permitir crear una partida física de una persona contra Stockfish 18 utilizando
 
 ## Experiencia prevista
 
-1. Al pulsar **Nueva partida**, se podrá elegir entre **Dos jugadores** y **En solitario**.
-2. En solitario se elegirá el color humano: **Blancas** o **Negras**.
-3. Se elegirá la fuerza de Stockfish de menor a mayor antes de iniciar la partida.
-4. En el turno humano, el tablero funcionará como ahora: detectará la jugada física, comprobará su legalidad y aplicará la ayuda configurada.
-5. En el turno de Stockfish, la app calculará una única jugada y mostrará claramente su origen y destino en la pantalla y mediante los LEDs del Chessnut.
-6. La persona ejecutará físicamente esa jugada por Stockfish. La app esperará hasta reconocer la posición final correcta; no avanzará el turno por una posición parcial o distinta.
+1. **Nueva partida** permanece siempre visible y permite elegir entre **Contra persona** y **Contra Stockfish**.
+2. Contra Stockfish se elige el color humano: **Blancas**, **Negras** o **Aleatorio**.
+3. Se elige la fuerza de Stockfish mediante niveles del 1 al 20 antes de iniciar la partida.
+4. Contra Stockfish se configura únicamente la ayuda del jugador; contra una persona se mantienen ayudas independientes para ambos bandos.
+5. En el turno humano, el tablero funcionará como ahora: detectará la jugada física, comprobará su legalidad y aplicará la ayuda configurada.
+6. En el turno de Stockfish, la app calculará una única jugada y mostrará claramente su origen y destino en la pantalla y mediante los LEDs del Chessnut.
+7. La persona ejecutará físicamente esa jugada por Stockfish. La app esperará hasta reconocer la posición final correcta; no avanzará el turno por una posición parcial o distinta.
 7. La jugada se guardará en SAN/PGN como cualquier otra y la partida seguirá hasta mate, tablas, abandono o cancelación.
 
 Si la persona elige negras, Stockfish propondrá su primera jugada inmediatamente después de sincronizar la posición inicial.
@@ -25,7 +26,7 @@ La copia fijada de Stockfish 18 ofrece dos mecanismos oficiales de limitación:
 - `Skill Level`: enteros de **0 a 20**;
 - `UCI_LimitStrength` junto con `UCI_Elo`: rango de **1320 a 3190 Elo**.
 
-La interfaz expondrá una escala sencilla ordenada de menor a mayor, con el Elo aproximado visible. Internamente se utilizará `UCI_LimitStrength=true` y `UCI_Elo` dentro del rango real de esta versión. El nivel máximo desactivará el límite de fuerza para usar Stockfish a plena potencia. Los valores se validarán en la capa Swift y de nuevo en el puente nativo antes de cambiar opciones UCI.
+La interfaz expone niveles del 1 al 20. Los niveles 1 a 19 se distribuyen dentro del rango real de esta versión mediante `UCI_LimitStrength=true` y `UCI_Elo`; el nivel 20 desactiva el límite para usar Stockfish a plena potencia. Los valores se validan en la capa Swift y de nuevo en el puente nativo antes de cambiar opciones UCI.
 
 La fuerza y el tiempo de respuesta son conceptos separados: habrá un límite de pensamiento adecuado para móvil para que una jugada no bloquee indefinidamente la partida.
 
@@ -51,7 +52,7 @@ En reconexión o reapertura, si era turno de Stockfish, se reconstruirá la part
 
 ## Criterios de aceptación
 
-- Se puede crear una partida en solitario con cualquiera de los dos colores.
+- Se puede crear una partida contra Stockfish con cualquiera de los dos colores o dejar que la app lo elija al azar.
 - El nivel seleccionado se conserva y llega a Stockfish dentro de su rango real.
 - Stockfish propone una jugada legal en cada turno suyo.
 - Origen y destino se distinguen con claridad en pantalla y tablero físico.

@@ -59,8 +59,8 @@ enum GameMode: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var displayText: String {
         switch self {
-        case .twoPlayer: "Dos jugadores"
-        case .solo: "En solitario"
+        case .twoPlayer: "Contra persona"
+        case .solo: "Contra Stockfish"
         }
     }
 }
@@ -74,6 +74,30 @@ enum PlayerSide: String, Codable, CaseIterable, Identifiable, Sendable {
     var displayText: String { self == .white ? "Blancas" : "Negras" }
 }
 
+enum HumanSideChoice: String, CaseIterable, Identifiable, Sendable {
+    case white
+    case black
+    case random
+
+    var id: String { rawValue }
+
+    var displayText: String {
+        switch self {
+        case .white: "Blancas"
+        case .black: "Negras"
+        case .random: "Aleatorio"
+        }
+    }
+
+    func resolvedSide(randomValue: Bool = Bool.random()) -> PlayerSide {
+        switch self {
+        case .white: .white
+        case .black: .black
+        case .random: randomValue ? .white : .black
+        }
+    }
+}
+
 enum MoveParticipant: String, Codable, Sendable {
     case player
     case human
@@ -83,6 +107,9 @@ enum MoveParticipant: String, Codable, Sendable {
 struct StockfishStrength: Equatable, Codable, Sendable {
     static let minimumElo = 1_320
     static let maximumElo = 3_190
+    static let minimumLevel = 1
+    static let maximumLevel = 20
+    private static let maximumLimitedLevel = maximumLevel - 1
     static let full = StockfishStrength(elo: nil)
 
     /// `nil` disables UCI_LimitStrength and lets Stockfish use full strength.
@@ -92,15 +119,44 @@ struct StockfishStrength: Equatable, Codable, Sendable {
         self.elo = elo.map { min(max($0, Self.minimumElo), Self.maximumElo) }
     }
 
+    init(level: Int) {
+        let level = min(max(level, Self.minimumLevel), Self.maximumLevel)
+        guard level < Self.maximumLevel else {
+            self = .full
+            return
+        }
+
+        let progress = Double(level - Self.minimumLevel)
+            / Double(Self.maximumLimitedLevel - Self.minimumLevel)
+        let elo = Double(Self.minimumElo)
+            + progress * Double(Self.maximumElo - Self.minimumElo)
+        self.init(elo: Int(elo.rounded()))
+    }
+
+    var level: Int {
+        guard let elo else { return Self.maximumLevel }
+        let progress = Double(elo - Self.minimumElo)
+            / Double(Self.maximumElo - Self.minimumElo)
+        let level = Self.minimumLevel
+            + Int((progress * Double(Self.maximumLimitedLevel - Self.minimumLevel)).rounded())
+        return min(max(level, Self.minimumLevel), Self.maximumLimitedLevel)
+    }
+
     var displayText: String {
-        elo.map { "Elo \($0)" } ?? "Máxima"
+        level == Self.maximumLevel ? "Nivel 20 · Máxima" : "Nivel \(level)"
+    }
+
+    var technicalDetailText: String {
+        elo.map { "Equivale aproximadamente a Elo \($0)." }
+            ?? "Stockfish jugará sin limitación de fuerza."
     }
 }
 
 struct NewGameConfiguration: Equatable, Sendable {
     var mode: GameMode = .twoPlayer
     var humanSide: PlayerSide = .white
-    var strength: StockfishStrength = StockfishStrength(elo: 1_600)
+    var strength: StockfishStrength = StockfishStrength(level: 4)
+    var assistance: AssistanceSettings = AssistanceSettings()
 }
 
 enum WhitePositionEvaluation: Equatable, Sendable {

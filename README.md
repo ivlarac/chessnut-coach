@@ -50,8 +50,8 @@ Las fases 7 y 8 se entregan juntas en una única PR:
 
 La fase 9 añade:
 
-- partidas físicas en solitario eligiendo blancas o negras;
-- fuerza de Stockfish configurable entre 1320 y 3190 Elo o sin limitación;
+- partidas físicas contra una persona o contra Stockfish, eligiendo blancas, negras o color aleatorio;
+- fuerza de Stockfish configurable mediante una escala sencilla de nivel 1 a 20;
 - sugerencia del motor visible en pantalla, con origen fijo y destino intermitente en los LEDs;
 - confirmación física obligatoria de la jugada exacta antes de avanzar el turno;
 - persistencia del modo, color, nivel, motor y autor de cada movimiento;
@@ -220,13 +220,13 @@ Antes del merge de esta PR:
 
 ## Fase 9: juego en solitario
 
-El modo contra Stockfish permite elegir blancas o negras, seleccionar la fuerza del motor de menor a mayor y ejecutar físicamente en el Chessnut la jugada sugerida en cada turno del motor.
+El botón **Nueva partida** está siempre visible y permite elegir entre **Contra persona** y **Contra Stockfish**, incluso antes de conectar el tablero. Contra una persona se mantienen ayudas independientes para blancas y negras. Contra Stockfish se elige la ayuda del jugador, su color —blancas, negras o aleatorio— y el nivel del motor de 1 a 20.
 
-La versión fijada del motor admite fuerza limitada mediante `UCI_Elo` de 1320 a 3190. El nivel máximo utiliza Stockfish sin limitación. El diseño, persistencia, estados y criterios de aceptación están en [`PHASE_9_SOLO_MODE.md`](PHASE_9_SOLO_MODE.md).
+Los niveles 1 a 19 recorren el rango real `UCI_Elo` de 1320 a 3190. El nivel 20 utiliza Stockfish sin limitación. El diseño, persistencia, estados y criterios de aceptación están en [`PHASE_9_SOLO_MODE.md`](PHASE_9_SOLO_MODE.md).
 
 ## Validación física de la fase 9
 
-1. crea una partida en solitario con blancas y nivel 1320;
+1. crea una partida contra Stockfish con blancas y nivel 1;
 2. juega una jugada humana y confirma que aparece una respuesta de Stockfish en pantalla y LEDs;
 3. intenta otra jugada legal del bando negro y confirma que no se registra;
 4. ejecuta la jugada propuesta y confirma que se guarda una única vez;

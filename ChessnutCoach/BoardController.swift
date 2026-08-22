@@ -214,6 +214,7 @@ final class BoardController: ObservableObject {
     func newGame(configuration: NewGameConfiguration = NewGameConfiguration()) {
         invalidateTransientAssistance(turnOffLEDs: isConnected)
         cancelEngineMoveRequest(clearSuggestion: true)
+        assistanceSettings = configuration.assistance
 
         let engineName = "Stockfish 18"
         let humanName = normalizedHumanName(
