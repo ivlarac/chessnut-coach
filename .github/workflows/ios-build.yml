@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ChessnutCoach/BoardController.swift ChessnutCoach/CurrentGameView.swift ChessnutCoach/ContentView.swift ChessnutCoachTests/OTBGameSessionTests.swift ChessnutCoach.xcodeproj/project.pbxproj Package.swift
+          git add ChessnutCoach/BoardController.swift ChessnutCoach/GameModels.swift ChessnutCoach/CurrentGameView.swift ChessnutCoach/ContentView.swift ChessnutCoachTests/OTBGameSessionTests.swift ChessnutCoach.xcodeproj/project.pbxproj Package.swift
           if git diff --cached --quiet; then
             echo 'No migration changes to commit'
           else
