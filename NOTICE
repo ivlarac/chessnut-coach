@@ -1,0 +1,14 @@
+Chessnut Coach
+Copyright 2026 ivlarac
+
+Original project:
+https://github.com/ivlarac/chessnut-coach
+
+The original Chessnut Coach code is licensed under the Apache License, Version 2.0.
+Redistributions and derivative works must preserve the applicable license,
+copyright, and attribution notices as required by that license.
+
+Third-party components are not relicensed by this NOTICE. They retain their
+respective copyright notices and license terms. In particular, the Stockfish
+source used by this project is included as the Vendor/Stockfish submodule and
+remains subject to the license provided by the Stockfish project.
