@@ -237,7 +237,7 @@ final class ChessUpBoardAdapter: NSObject, ElectronicChessBoard, CBCentralManage
     }
 
     func connect() async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             queue.async { [weak self] in
                 guard let self else {
                     continuation.resume(throwing: CancellationError())
@@ -264,7 +264,7 @@ final class ChessUpBoardAdapter: NSObject, ElectronicChessBoard, CBCentralManage
     }
 
     func disconnect() async {
-        await withCheckedContinuation { continuation in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async { [weak self] in
                 guard let self else {
                     continuation.resume()
@@ -498,10 +498,13 @@ final class ChessUpBoardAdapter: NSObject, ElectronicChessBoard, CBCentralManage
     }
 
     private func write(_ bytes: [UInt8]) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             queue.async { [weak self] in
                 do {
-                    try self?.writeSynchronously(bytes)
+                    guard let self else {
+                        throw CancellationError()
+                    }
+                    try self.writeSynchronously(bytes)
                     continuation.resume()
                 } catch {
                     continuation.resume(throwing: error)
