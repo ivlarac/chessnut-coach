@@ -1,6 +1,5 @@
 import ChessKit
 import Combine
-import EasyLinkSwiftSDK
 import Foundation
 
 struct SoloEngineSuggestion: Equatable, Sendable {
@@ -48,6 +47,9 @@ final class BoardController: ObservableObject {
     @Published private(set) var status = "Desconectado"
     @Published private(set) var boardPlacement = ""
     @Published private(set) var batteryPercentage: Int?
+    @Published private(set) var discoveredBoards: [ElectronicBoardDescriptor] = []
+    @Published private(set) var isScanningForBoards = false
+    @Published private(set) var connectedBoard: ElectronicBoardDescriptor?
 
     @Published private(set) var logicalPlacement = OTBGameSession().logicalPlacement
     @Published private(set) var gameStatus = "No hay ninguna partida iniciada. Pulsa «Nueva partida» para comenzar."
@@ -80,6 +82,9 @@ final class BoardController: ObservableObject {
     var whiteAssistanceMode: AssistanceMode { assistanceSettings.white }
     var blackAssistanceMode: AssistanceMode { assistanceSettings.black }
     var currentGameID: UUID { gameSession.gameRecord.id }
+    var boardDisplayName: String { connectedBoard?.name ?? selectedBoard?.name ?? "Tablero electrónico" }
+    var supportsLEDs: Bool { client?.capabilities.contains(.leds) ?? false }
+    var supportsBattery: Bool { client?.capabilities.contains(.battery) ?? false }
     var isSoloGame: Bool { gameMode == .solo }
     var isEngineTurn: Bool {
         hasActiveGame
@@ -88,7 +93,14 @@ final class BoardController: ObservableObject {
             && !gameSession.isFinished
     }
 
-    private var client: EasyLinkClient?
+    private var client: (any ElectronicChessBoard)?
+    private let boardDiscovery: any ElectronicChessBoardDiscovery
+    private let adapterRegistry: ElectronicBoardAdapterRegistry
+    private let preferences: UserDefaults
+    private var selectedBoard: ElectronicBoardDescriptor?
+    private var discoveryTask: Task<Void, Never>?
+    private var discoveryTimeoutTask: Task<Void, Never>?
+    private let lastBoardPreferenceKey = "LastElectronicChessBoardID"
     private var connectionTask: Task<Void, Never>?
     private var reconnectionTask: Task<Void, Never>?
     private var disconnectionTask: Task<Void, Never>?
@@ -112,7 +124,7 @@ final class BoardController: ObservableObject {
     private var engineMoveGeneration = 0
     private var physicalSnapshotRevision = 0
 
-    // Chessnut can emit several physical snapshots while a hand is moving a
+    // Electronic boards can emit several physical snapshots while a hand is moving a
     // piece. Never let LED writes block consumption of that realtime stream:
     // keep only the newest snapshot and process it after a very short settle.
     private var latestPhysicalPlacement = ""
@@ -130,14 +142,22 @@ final class BoardController: ObservableObject {
         "No hay ninguna partida iniciada. Pulsa «Nueva partida» para comenzar."
     }
 
-    init(library: GameLibrary? = nil) {
+    init(
+        library: GameLibrary? = nil,
+        boardDiscovery: any ElectronicChessBoardDiscovery = ChessnutBoardDiscovery(),
+        adapterRegistry: ElectronicBoardAdapterRegistry = .chessnutDefault,
+        preferences: UserDefaults = .standard
+    ) {
         gameLibrary = library
+        self.boardDiscovery = boardDiscovery
+        self.adapterRegistry = adapterRegistry
+        self.preferences = preferences
 
         if let savedGame = library?.resumableGame,
            let restoredSession = try? OTBGameSession(restoring: savedGame) {
             gameSession = restoredSession
             hasActiveGame = true
-            gameStatus = "Partida recuperada. Puedes continuar en pantalla o conectar el Chessnut."
+            gameStatus = "Partida recuperada. Puedes continuar en pantalla o conectar un tablero físico."
         }
 
         publishGameState()
@@ -150,28 +170,129 @@ final class BoardController: ObservableObject {
 
     func connect() {
         shouldMaintainConnection = true
+        if selectedBoard != nil {
+            startConnection(isReconnect: false)
+        } else {
+            scanForBoards()
+        }
+    }
+
+    func scanForBoards() {
+        guard !isConnected else { return }
+
+        shouldMaintainConnection = true
+        connectionTask?.cancel()
+        connectionTask = nil
+        reconnectionTask?.cancel()
+        reconnectionTask = nil
+        stopDiscovery()
+
+        selectedBoard = nil
+        discoveredBoards = []
+        isScanningForBoards = true
+        status = "Buscando tableros electrónicos compatibles…"
+
+        let rememberedID = preferences.string(forKey: lastBoardPreferenceKey)
+        let stream = boardDiscovery.scan()
+        discoveryTask = Task { [weak self] in
+            guard let self else { return }
+
+            for await descriptor in stream {
+                guard !Task.isCancelled else { return }
+
+                if !self.discoveredBoards.contains(where: { $0.id == descriptor.id }) {
+                    self.discoveredBoards.append(descriptor)
+                    self.discoveredBoards.sort {
+                        $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                    }
+                }
+
+                if descriptor.id == rememberedID {
+                    self.selectedBoard = descriptor
+                    self.preferences.set(descriptor.id, forKey: self.lastBoardPreferenceKey)
+                    self.stopDiscovery()
+                    self.startConnection(isReconnect: false)
+                    return
+                }
+
+                self.status = self.discoveredBoards.count == 1
+                    ? "Tablero encontrado. Selecciónalo para conectar."
+                    : "Se encontraron \(self.discoveredBoards.count) tableros. Selecciona uno."
+            }
+
+            guard !Task.isCancelled else { return }
+            self.isScanningForBoards = false
+            self.discoveryTask = nil
+            if self.discoveredBoards.isEmpty {
+                self.status = "No se encontraron tableros compatibles"
+            }
+        }
+
+        discoveryTimeoutTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(8))
+                try Task.checkCancellation()
+                guard let self else { return }
+
+                self.discoveryTask?.cancel()
+                self.discoveryTask = nil
+                self.discoveryTimeoutTask = nil
+                self.isScanningForBoards = false
+                self.status = self.discoveredBoards.isEmpty
+                    ? "No se encontraron tableros compatibles"
+                    : (self.discoveredBoards.count == 1
+                        ? "Tablero encontrado. Selecciónalo para conectar."
+                        : "Se encontraron \(self.discoveredBoards.count) tableros. Selecciona uno.")
+            } catch {
+                // Scanning was stopped because a board was selected or a new scan started.
+            }
+        }
+    }
+
+    func connect(to descriptor: ElectronicBoardDescriptor) {
+        guard !isConnected else { return }
+
+        shouldMaintainConnection = true
+        selectedBoard = descriptor
+        preferences.set(descriptor.id, forKey: lastBoardPreferenceKey)
+        stopDiscovery()
         startConnection(isReconnect: false)
+    }
+
+    private func stopDiscovery() {
+        discoveryTask?.cancel()
+        discoveryTask = nil
+        discoveryTimeoutTask?.cancel()
+        discoveryTimeoutTask = nil
+        isScanningForBoards = false
     }
 
     private func startConnection(isReconnect: Bool) {
         guard shouldMaintainConnection,
               connectionTask == nil,
-              !isConnected
+              !isConnected,
+              let descriptor = selectedBoard
         else { return }
 
         reconnectionTask?.cancel()
         reconnectionTask = nil
-        status = isReconnect ? "Reconectando Chessnut Air…" : "Buscando Chessnut Air…"
+        status = isReconnect
+            ? "Reconectando a \(descriptor.name)…"
+            : "Conectando a \(descriptor.name)…"
 
         connectionTask = Task { [weak self] in
             guard let self else { return }
 
-            let transport = MonitoredEasyLinkTransport(profile: .classic)
-            let client = EasyLinkClient(profile: .classic, transport: transport)
-
             do {
-                try await client.connect()
-                try await client.enableRealtimeUpdates()
+                let client = try self.adapterRegistry.makeBoard(for: descriptor)
+
+                do {
+                    try await client.connect()
+                    try await client.enableRealtimeUpdates()
+                } catch {
+                    await client.disconnect()
+                    throw error
+                }
 
                 guard !Task.isCancelled, self.shouldMaintainConnection else {
                     await client.disconnect()
@@ -179,20 +300,24 @@ final class BoardController: ObservableObject {
                 }
 
                 self.client = client
+                self.connectedBoard = descriptor
                 self.isConnected = true
                 self.status = isReconnect
-                    ? "Reconectado · validando posición del tablero…"
-                    : "Conectado · esperando posición del tablero…"
+                    ? "\(descriptor.name) reconectado · validando posición…"
+                    : "\(descriptor.name) conectado · esperando posición…"
                 self.clearScreenInteraction()
                 self.prepareForFreshPhysicalSnapshot()
-                self.startDisconnectionStream(transport: transport, client: client)
+                self.startDisconnectionStream(client: client)
                 self.startFENStream(client: client)
+                self.refreshBattery()
             } catch {
-                await client.disconnect()
                 guard !Task.isCancelled else { return }
                 self.client = nil
+                self.connectedBoard = nil
                 self.isConnected = false
-                self.status = "Conexión perdida · nuevo intento en breve"
+                self.status = isReconnect
+                    ? "Conexión perdida · nuevo intento en breve"
+                    : "No se pudo conectar a \(descriptor.name): \(error.localizedDescription)"
                 self.prepareScreenTurn()
             }
 
@@ -206,6 +331,7 @@ final class BoardController: ObservableObject {
 
     func disconnect() {
         shouldMaintainConnection = false
+        stopDiscovery()
         connectionTask?.cancel()
         connectionTask = nil
         reconnectionTask?.cancel()
@@ -231,7 +357,9 @@ final class BoardController: ObservableObject {
         self.client = nil
 
         Task { [weak self] in
-            try? await client.setLEDs(.allOff)
+            if client.capabilities.contains(.leds) {
+                try? await client.setLEDs(.allOff)
+            }
             await client.disconnect()
             self?.resetConnectionState()
         }
@@ -257,7 +385,10 @@ final class BoardController: ObservableObject {
     }
 
     func refreshBattery() {
-        guard let client else { return }
+        guard let client, client.capabilities.contains(.battery) else {
+            batteryPercentage = nil
+            return
+        }
 
         Task { [weak self] in
             await self?.refreshBattery(using: client)
@@ -409,12 +540,12 @@ final class BoardController: ObservableObject {
     }
 
     func lightLED(rankIndex: Int, fileIndex: Int) {
-        guard let client else { return }
+        guard let client, client.capabilities.contains(.leds) else { return }
         guard (0..<8).contains(rankIndex), (0..<8).contains(fileIndex) else { return }
 
         invalidateTransientAssistance(turnOffLEDs: false)
         ledTask = Task { [weak self] in
-            var leds = LEDBoard.allOff
+            var leds = ElectronicBoardLEDFrame.allOff
             leds[rankIndex: rankIndex, fileIndex: fileIndex] = .red
 
             do {
@@ -431,12 +562,12 @@ final class BoardController: ObservableObject {
     }
 
     func blinkLED(rankIndex: Int, fileIndex: Int) {
-        guard let client else { return }
+        guard let client, client.capabilities.contains(.leds) else { return }
         guard (0..<8).contains(rankIndex), (0..<8).contains(fileIndex) else { return }
 
         invalidateTransientAssistance(turnOffLEDs: false)
         ledTask = Task { [weak self] in
-            var leds = LEDBoard.allOff
+            var leds = ElectronicBoardLEDFrame.allOff
             leds[rankIndex: rankIndex, fileIndex: fileIndex] = .red
 
             do {
@@ -460,7 +591,7 @@ final class BoardController: ObservableObject {
     }
 
     func demoLEDPatterns() {
-        guard let client else { return }
+        guard let client, client.capabilities.contains(.leds) else { return }
 
         invalidateTransientAssistance(turnOffLEDs: false)
 
@@ -476,7 +607,7 @@ final class BoardController: ObservableObject {
     }
 
     func ledsOff() {
-        guard let client else { return }
+        guard let client, client.capabilities.contains(.leds) else { return }
 
         invalidateTransientAssistance(turnOffLEDs: false)
         ledTask = Task { [weak self] in
@@ -490,13 +621,10 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func startDisconnectionStream(
-        transport: MonitoredEasyLinkTransport,
-        client: EasyLinkClient
-    ) {
+    private func startDisconnectionStream(client: any ElectronicChessBoard) {
         disconnectionTask?.cancel()
         disconnectionTask = Task { [weak self] in
-            for await event in transport.connectionEvents {
+            for await event in client.connectionEvents {
                 guard !Task.isCancelled else { return }
 
                 switch event {
@@ -508,16 +636,17 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func handleUnexpectedDisconnect(client disconnectedClient: EasyLinkClient) {
+    private func handleUnexpectedDisconnect(client disconnectedClient: any ElectronicChessBoard) {
         guard shouldMaintainConnection,
               let client,
               client === disconnectedClient
         else { return }
 
         self.client = nil
+        connectedBoard = nil
         isConnected = false
         batteryPercentage = nil
-        status = "Chessnut desconectado · reconectando…"
+        status = "\(selectedBoard?.name ?? "Tablero") desconectado · reconectando…"
 
         disconnectionTask?.cancel()
         disconnectionTask = nil
@@ -537,7 +666,7 @@ final class BoardController: ObservableObject {
         scheduleReconnect()
     }
 
-    private func handleClientFailure(_ error: Error, client failedClient: EasyLinkClient) {
+    private func handleClientFailure(_ error: Error, client failedClient: any ElectronicChessBoard) {
         guard !(error is CancellationError),
               let client,
               client === failedClient
@@ -578,7 +707,7 @@ final class BoardController: ObservableObject {
         isBoardSynchronized = false
         activeHintSummary = ""
         gameStatus = hasActiveGame
-            ? "Conexión activa. Esperando la posición actual del Chessnut para recuperar la partida."
+            ? "Conexión activa. Esperando la posición actual del tablero para recuperar la partida."
             : idleGameStatus
     }
 
@@ -592,10 +721,14 @@ final class BoardController: ObservableObject {
             guard let self else { return }
 
             do {
-                let battery = try await client.batteryStatus(timeout: .seconds(3))
-                try Task.checkCancellation()
-                guard self.client === client else { return }
-                self.batteryPercentage = battery.percentage
+                if client.capabilities.contains(.battery) {
+                    let battery = try await client.batteryStatus(timeout: .seconds(3))
+                    try Task.checkCancellation()
+                    guard self.client === client else { return }
+                    self.batteryPercentage = battery.percentage
+                } else {
+                    self.batteryPercentage = nil
+                }
 
                 if shouldRequestSnapshot {
                     try await client.enableRealtimeUpdates()
@@ -626,17 +759,17 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func startFENStream(client: EasyLinkClient) {
+    private func startFENStream(client: any ElectronicChessBoard) {
         fenTask?.cancel()
         fenTask = Task { [weak self] in
-            for await placement in client.fenUpdates {
+            for await placement in client.positionUpdates {
                 guard !Task.isCancelled else { return }
                 self?.receivePhysicalPlacement(placement, client: client)
             }
         }
     }
 
-    private func receivePhysicalPlacement(_ placement: String, client: EasyLinkClient) {
+    private func receivePhysicalPlacement(_ placement: String, client: any ElectronicChessBoard) {
         boardPlacement = placement
         physicalSnapshotRevision += 1
 
@@ -648,7 +781,7 @@ final class BoardController: ObservableObject {
 
     private func schedulePhysicalPlacement(
         _ placement: String,
-        client: EasyLinkClient,
+        client: any ElectronicChessBoard,
         force: Bool = false
     ) {
         fenDebounceTask?.cancel()
@@ -671,7 +804,7 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func processStablePhysicalPlacement(_ placement: String, client: EasyLinkClient) async {
+    private func processStablePhysicalPlacement(_ placement: String, client: any ElectronicChessBoard) async {
         guard placement == latestPhysicalPlacement else { return }
 
         lastProcessedPlacement = placement
@@ -762,6 +895,9 @@ final class BoardController: ObservableObject {
                 } else if legalTargets.isEmpty {
                     gameStatus = "\(source.notation) no tiene movimientos legales."
                     try await client.setLEDs(.allOff)
+                } else if !client.capabilities.contains(.leds) {
+                    activeHintSummary = ""
+                    gameStatus = "Pieza levantada en \(source.notation). Este tablero no dispone de LEDs; continúa sin ayuda luminosa."
                 } else {
                     let mode = assistanceSettings.mode(for: gameSession.sideToMove)
 
@@ -864,6 +1000,7 @@ final class BoardController: ObservableObject {
     private func refreshCurrentAssistanceIfNeeded() {
         guard hasActiveGame,
               let client,
+              client.capabilities.contains(.leds),
               let source = gameSession.liftedSquare,
               !gameSession.legalTargets.isEmpty,
               !gameSession.isFinished,
@@ -921,7 +1058,7 @@ final class BoardController: ObservableObject {
         source: Square,
         legalTargets: [Square],
         mode: AssistanceMode,
-        client: EasyLinkClient
+        client: any ElectronicChessBoard
     ) {
         coachingTask?.cancel()
         clearStockfishHints()
@@ -977,11 +1114,11 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func startLEDHints(_ hints: [LEDHint], client: EasyLinkClient) {
+    private func startLEDHints(_ hints: [LEDHint], client: any ElectronicChessBoard) {
         ledTask?.cancel()
         let generation = assistanceGeneration
 
-        guard !hints.isEmpty else {
+        guard client.capabilities.contains(.leds), !hints.isEmpty else {
             activeHintSummary = ""
             return
         }
@@ -1030,7 +1167,7 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func scheduleEngineMoveIfNeeded(client: EasyLinkClient) {
+    private func scheduleEngineMoveIfNeeded(client: any ElectronicChessBoard) {
         guard isEngineTurn,
               gameSession.isSynchronized,
               engineMoveTask == nil
@@ -1091,7 +1228,7 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func startEngineMoveLEDs(_ move: OTBExpectedMove, client: EasyLinkClient) {
+    private func startEngineMoveLEDs(_ move: OTBExpectedMove, client: any ElectronicChessBoard) {
         startLEDHints(
             [
                 LEDHint(square: move.from, pattern: .steady),
@@ -1153,7 +1290,7 @@ final class BoardController: ObservableObject {
         screenHints = []
         activeHintSummary = ""
 
-        guard turnOffLEDs, let client else { return }
+        guard turnOffLEDs, let client, client.capabilities.contains(.leds) else { return }
         let generation = assistanceGeneration
 
         Task { [weak self] in
@@ -1174,8 +1311,8 @@ final class BoardController: ObservableObject {
         }
     }
 
-    private func ledBoard(for squares: [Square]) -> LEDBoard {
-        var leds = LEDBoard.allOff
+    private func ledBoard(for squares: [Square]) -> ElectronicBoardLEDFrame {
+        var leds = ElectronicBoardLEDFrame.allOff
 
         for square in squares {
             let rankIndex = 8 - square.rank.value
@@ -1299,7 +1436,12 @@ final class BoardController: ObservableObject {
         invalidateTransientAssistance(turnOffLEDs: isConnected)
     }
 
-    private func refreshBattery(using client: EasyLinkClient) async {
+    private func refreshBattery(using client: any ElectronicChessBoard) async {
+        guard client.capabilities.contains(.battery) else {
+            batteryPercentage = nil
+            return
+        }
+
         do {
             let battery = try await client.batteryStatus(timeout: .seconds(3))
             batteryPercentage = battery.percentage
@@ -1310,6 +1452,7 @@ final class BoardController: ObservableObject {
 
     private func resetConnectionState() {
         isConnected = false
+        connectedBoard = nil
         status = "Desconectado"
         boardPlacement = ""
         batteryPercentage = nil
@@ -1413,7 +1556,7 @@ extension BoardController {
             scheduleScreenEngineMoveIfNeeded()
         } else {
             gameStatus = moveCount == 0
-                ? "Tablero Chessnut desconectado. Juega directamente en el tablero de la pantalla."
+                ? "Tablero físico desconectado. Juega directamente en el tablero de la pantalla."
                 : "Turno de \(sideToMoveLabel.lowercased()). Juega directamente en la pantalla."
             scheduleStockfishPrewarmIfNeeded()
         }
