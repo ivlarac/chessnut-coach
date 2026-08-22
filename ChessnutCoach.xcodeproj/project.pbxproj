@@ -17,6 +17,8 @@
 		A10000000000000000000008 /* StockfishEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* StockfishEngine.swift */; };
 		A10000000000000000000009 /* EngineDiagnosticController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* EngineDiagnosticController.swift */; };
 		A1000000000000000000000A /* MonitoredEasyLinkTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* MonitoredEasyLinkTransport.swift */; };
+		A10000000000000000000012 /* ElectronicChessBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* ElectronicChessBoard.swift */; };
+		A10000000000000000000013 /* ChessnutBoardAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* ChessnutBoardAdapter.swift */; };
 		A1000000000000000000000B /* GameArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000B /* GameArchive.swift */; };
 		A1000000000000000000000C /* GameLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000C /* GameLibrary.swift */; };
 		A1000000000000000000000D /* GameLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000D /* GameLibraryView.swift */; };
@@ -48,6 +50,8 @@
 		B10000000000000000000007 /* StockfishEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockfishEngine.swift; sourceTree = "<group>"; };
 		B10000000000000000000008 /* EngineDiagnosticController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineDiagnosticController.swift; sourceTree = "<group>"; };
 		B10000000000000000000009 /* MonitoredEasyLinkTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoredEasyLinkTransport.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* ElectronicChessBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElectronicChessBoard.swift; sourceTree = "<group>"; };
+		B10000000000000000000013 /* ChessnutBoardAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChessnutBoardAdapter.swift; sourceTree = "<group>"; };
 		B1000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000000000000000000000B /* GameArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameArchive.swift; sourceTree = "<group>"; };
 		B1000000000000000000000C /* GameLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLibrary.swift; sourceTree = "<group>"; };
@@ -107,6 +111,8 @@
 				B10000000000000000000007 /* StockfishEngine.swift */,
 				B10000000000000000000008 /* EngineDiagnosticController.swift */,
 				B10000000000000000000009 /* MonitoredEasyLinkTransport.swift */,
+				B10000000000000000000012 /* ElectronicChessBoard.swift */,
+				B10000000000000000000013 /* ChessnutBoardAdapter.swift */,
 				B10000000000000000000011 /* Assets.xcassets */,
 				B1000000000000000000000A /* Info.plist */,
 			);
@@ -290,6 +296,8 @@
 				A10000000000000000000008 /* StockfishEngine.swift in Sources */,
 				A10000000000000000000009 /* EngineDiagnosticController.swift in Sources */,
 				A1000000000000000000000A /* MonitoredEasyLinkTransport.swift in Sources */,
+				A10000000000000000000012 /* ElectronicChessBoard.swift in Sources */,
+				A10000000000000000000013 /* ChessnutBoardAdapter.swift in Sources */,
 				A1000000000000000000000B /* GameArchive.swift in Sources */,
 				A1000000000000000000000C /* GameLibrary.swift in Sources */,
 				A1000000000000000000000D /* GameLibraryView.swift in Sources */,
@@ -356,12 +364,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ChessnutCoach/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.0.9;
+				MARKETING_VERSION = 0.0.10;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"$(DERIVED_FILE_DIR)/stockfish18/libStockfish18.a",
@@ -384,12 +392,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ChessnutCoach/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.0.9;
+				MARKETING_VERSION = 0.0.10;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"$(DERIVED_FILE_DIR)/stockfish18/libStockfish18.a",

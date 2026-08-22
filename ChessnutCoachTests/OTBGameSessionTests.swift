@@ -587,6 +587,36 @@ final class OTBGameSessionTests: XCTestCase {
         )
     }
 
+    func testElectronicBoardCapabilitiesRepresentOptionalHardwareFeatures() {
+        let minimal: ElectronicBoardCapabilities = [.positionReading, .realtimePosition]
+        XCTAssertTrue(minimal.contains(.positionReading))
+        XCTAssertTrue(minimal.contains(.realtimePosition))
+        XCTAssertFalse(minimal.contains(.leds))
+        XCTAssertFalse(minimal.contains(.battery))
+        XCTAssertFalse(minimal.contains(.automaticMovement))
+
+        let rich: ElectronicBoardCapabilities = [
+            .positionReading, .realtimePosition, .leds, .ledColors, .battery,
+            .gameStorage, .automaticMovement, .pieceIdentification,
+        ]
+        XCTAssertTrue(rich.contains(.ledColors))
+        XCTAssertTrue(rich.contains(.pieceIdentification))
+    }
+
+    func testElectronicBoardRegistrySelectsMatchingAdapter() throws {
+        let descriptor = TestElectronicChessBoard.makeDescriptor(adapterIdentifier: "test.adapter")
+        let fake = TestElectronicChessBoard(descriptor: descriptor)
+        let registry = ElectronicBoardAdapterRegistry(
+            factories: [TestElectronicBoardFactory(board: fake)]
+        )
+
+        let selected = try registry.makeBoard(for: descriptor)
+        XCTAssertEqual(selected.descriptor, descriptor)
+
+        let unsupported = TestElectronicChessBoard.makeDescriptor(adapterIdentifier: "other.adapter")
+        XCTAssertThrowsError(try registry.makeBoard(for: unsupported))
+    }
+
 #if !SWIFT_PACKAGE
     @MainActor
     func testCoreDataLibraryUpsertsUpdatesAndDeletesGame() {
@@ -699,6 +729,86 @@ final class OTBGameSessionTests: XCTestCase {
 
         XCTAssertEqual(clientNotification, .disconnected)
         XCTAssertEqual(connectionEvent, .disconnected)
+    }
+
+    @MainActor
+    func testBoardControllerConnectsDisconnectsAndReceivesGenericBoardPositions() async throws {
+        let descriptor = TestElectronicChessBoard.makeDescriptor(
+            capabilities: [.positionReading, .realtimePosition, .battery]
+        )
+        let fake = TestElectronicChessBoard(descriptor: descriptor)
+        let preferences = UserDefaults(suiteName: UUID().uuidString)!
+        let controller = BoardController(
+            library: GameLibrary(inMemory: true),
+            boardDiscovery: TestElectronicBoardDiscovery(devices: [descriptor]),
+            adapterRegistry: ElectronicBoardAdapterRegistry(
+                factories: [TestElectronicBoardFactory(board: fake)]
+            ),
+            preferences: preferences
+        )
+
+        controller.connect(to: descriptor)
+        try await waitUntil { controller.isConnected }
+        XCTAssertEqual(controller.connectedBoard, descriptor)
+        XCTAssertTrue(controller.supportsBattery)
+
+        let placement = Position.standard.fen.split(separator: " ").first.map(String.init)!
+        fake.emitPosition(placement)
+        try await waitUntil { controller.boardPlacement == placement }
+
+        controller.disconnect()
+        try await waitUntil { !controller.isConnected }
+        XCTAssertNil(controller.connectedBoard)
+    }
+
+    @MainActor
+    func testBoardControllerKeepsGameWorkingWhenBoardHasNoLEDs() async throws {
+        let descriptor = TestElectronicChessBoard.makeDescriptor(
+            capabilities: [.positionReading, .realtimePosition]
+        )
+        let fake = TestElectronicChessBoard(descriptor: descriptor)
+        let controller = BoardController(
+            library: GameLibrary(inMemory: true),
+            boardDiscovery: TestElectronicBoardDiscovery(devices: [descriptor]),
+            adapterRegistry: ElectronicBoardAdapterRegistry(
+                factories: [TestElectronicBoardFactory(board: fake)]
+            ),
+            preferences: UserDefaults(suiteName: UUID().uuidString)!
+        )
+
+        controller.newGame(
+            configuration: NewGameConfiguration(
+                assistance: AssistanceSettings(white: .legalMoves, black: .legalMoves)
+            )
+        )
+        controller.connect(to: descriptor)
+        try await waitUntil { controller.isConnected }
+
+        let initial = Position.standard.fen.split(separator: " ").first.map(String.init)!
+        fake.emitPosition(initial)
+        try await waitUntil { controller.isBoardSynchronized }
+
+        let liftedE2 = "rnbqkbnr/pppppppp/8/8/8/8/PPPP1PPP/RNBQKBNR"
+        fake.emitPosition(liftedE2)
+        try await waitUntil { controller.liftedSquare == "e2" }
+
+        XCTAssertTrue(controller.isConnected)
+        XCTAssertFalse(controller.supportsLEDs)
+        XCTAssertEqual(controller.legalTargets, ["e3", "e4"])
+        XCTAssertTrue(controller.activeHintSummary.isEmpty)
+        XCTAssertTrue(controller.gameStatus.contains("no dispone de LEDs"))
+    }
+
+    @MainActor
+    private func waitUntil(
+        timeoutIterations: Int = 80,
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        for _ in 0..<timeoutIterations {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTFail("Timed out waiting for asynchronous board state")
     }
 
     func testStockfishScoreInversionAndOrderingForCoaching() {
@@ -839,3 +949,95 @@ private final class TestEasyLinkTransport: EasyLinkTransport, @unchecked Sendabl
     }
 }
 #endif
+
+
+private final class TestElectronicChessBoard: ElectronicChessBoard, @unchecked Sendable {
+    let descriptor: ElectronicBoardDescriptor
+    let capabilities: ElectronicBoardCapabilities
+    let positionUpdates: AsyncStream<String>
+    let connectionEvents: AsyncStream<ElectronicBoardConnectionEvent>
+
+    private let positionContinuation: AsyncStream<String>.Continuation
+    private let connectionContinuation: AsyncStream<ElectronicBoardConnectionEvent>.Continuation
+
+    init(descriptor: ElectronicBoardDescriptor) {
+        self.descriptor = descriptor
+        capabilities = descriptor.capabilities
+
+        var positionContinuation: AsyncStream<String>.Continuation!
+        positionUpdates = AsyncStream { positionContinuation = $0 }
+        self.positionContinuation = positionContinuation
+
+        var connectionContinuation: AsyncStream<ElectronicBoardConnectionEvent>.Continuation!
+        connectionEvents = AsyncStream { connectionContinuation = $0 }
+        self.connectionContinuation = connectionContinuation
+    }
+
+    func connect() async throws {}
+    func enableRealtimeUpdates() async throws {}
+
+    func disconnect() async {
+        connectionContinuation.yield(.disconnected)
+    }
+
+    func batteryStatus(timeout: Duration) async throws -> ElectronicBoardBatteryStatus {
+        _ = timeout
+        guard capabilities.contains(.battery) else {
+            throw ElectronicBoardError.unsupportedCapability("batería")
+        }
+        return ElectronicBoardBatteryStatus(percentage: 73, isCharging: false)
+    }
+
+    func emitPosition(_ placement: String) {
+        positionContinuation.yield(placement)
+    }
+
+    static func makeDescriptor(
+        adapterIdentifier: String = "test.adapter",
+        capabilities: ElectronicBoardCapabilities = [.positionReading, .realtimePosition]
+    ) -> ElectronicBoardDescriptor {
+        ElectronicBoardDescriptor(
+            adapterIdentifier: adapterIdentifier,
+            hardwareIdentifier: UUID().uuidString,
+            name: "Test Board",
+            manufacturer: "Tests",
+            model: "Fake",
+            variantIdentifier: "fake",
+            capabilities: capabilities
+        )
+    }
+}
+
+private struct TestElectronicBoardFactory: ElectronicBoardAdapterFactory {
+    let identifier: String
+    let board: any ElectronicChessBoard
+
+    init(board: any ElectronicChessBoard) {
+        self.board = board
+        identifier = board.descriptor.adapterIdentifier
+    }
+
+    func canCreateBoard(for descriptor: ElectronicBoardDescriptor) -> Bool {
+        descriptor.adapterIdentifier == identifier
+    }
+
+    func makeBoard(for descriptor: ElectronicBoardDescriptor) throws -> any ElectronicChessBoard {
+        guard canCreateBoard(for: descriptor) else {
+            throw ElectronicBoardError.noAdapter(descriptor.name)
+        }
+        return board
+    }
+}
+
+private struct TestElectronicBoardDiscovery: ElectronicChessBoardDiscovery {
+    let devices: [ElectronicBoardDescriptor]
+
+    func scan() -> AsyncStream<ElectronicBoardDescriptor> {
+        AsyncStream { continuation in
+            for device in devices {
+                continuation.yield(device)
+            }
+            continuation.finish()
+        }
+    }
+}
