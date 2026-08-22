@@ -11,15 +11,14 @@ struct CurrentGameView: View {
     @State private var finishAction: FinishAction?
     @State private var isFinishDialogPresented = false
     @State private var isNewGamePresented = false
+    @State private var boardPerspective = ChessBoardPerspective.whiteAtBottom
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 16) {
                     connectionCard
-                    if !board.isConnected {
-                        screenBoardCard
-                    }
+                    screenBoardCard
                     gameCard
                     assistanceCard
                     historyCard
@@ -98,7 +97,7 @@ struct CurrentGameView: View {
             if board.isConnected {
                 if !board.supportsLEDs {
                     Label(
-                        "Este tablero no ofrece LEDs; la partida y la detección de jugadas siguen disponibles sin ayudas luminosas.",
+                        "Este tablero no ofrece LEDs físicos; las ayudas se mostrarán en el tablero virtual.",
                         systemImage: "lightbulb.slash"
                     )
                     .font(.footnote)
@@ -170,10 +169,37 @@ struct CurrentGameView: View {
 
     private var screenBoardCard: some View {
         CoachCard("Tablero en pantalla", systemImage: "checkerboard.rectangle") {
-            OnScreenChessBoard(board: board)
+            HStack(spacing: 12) {
+                Label(
+                    board.isConnected ? "Referencia visual · Solo lectura" : "Tablero interactivo",
+                    systemImage: board.isConnected ? "eye" : "hand.tap"
+                )
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button {
+                    boardPerspective = boardPerspective.opposite
+                } label: {
+                    Label("Girar", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityHint("Alterna qué color se muestra en la parte inferior")
+            }
+
+            OnScreenChessBoard(
+                board: board,
+                perspective: boardPerspective,
+                isInteractive: !board.isConnected
+            )
                 .aspectRatio(1, contentMode: .fit)
 
-            if board.hasActiveGame {
+            if board.isConnected {
+                Text("Mueve las piezas únicamente en el tablero físico. El tablero virtual refleja la posición y las ayudas, pero no admite movimientos mientras Bluetooth esté conectado.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if board.hasActiveGame {
                 Label(
                     board.isEngineTurn
                         ? "Stockfish moverá automáticamente sus piezas cuando termine de calcular."
@@ -183,7 +209,7 @@ struct CurrentGameView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             } else {
-                Text("Inicia una partida para jugar directamente aquí mientras el tablero físico esté desconectado.")
+                Text("Inicia una partida para jugar directamente aquí.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -360,7 +386,7 @@ struct CurrentGameView: View {
                 mode: board.whiteAssistanceMode,
                 selection: whiteAssistanceBinding
             )
-            .disabled((board.hasActiveGame && board.isSoloGame && board.humanSide == .black) || (board.isConnected && !board.supportsLEDs))
+            .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .black)
 
             Divider()
 
@@ -369,10 +395,10 @@ struct CurrentGameView: View {
                 mode: board.blackAssistanceMode,
                 selection: blackAssistanceBinding
             )
-            .disabled((board.hasActiveGame && board.isSoloGame && board.humanSide == .white) || (board.isConnected && !board.supportsLEDs))
+            .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .white)
 
             if board.isConnected && !board.supportsLEDs {
-                Text("Las ayudas por LED no están disponibles con el tablero conectado actualmente.")
+                Text("Este tablero no puede mostrar ayudas con LEDs físicos; las ayudas configuradas aparecerán como puntos verdes en el tablero virtual.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -561,6 +587,8 @@ struct CurrentGameView: View {
 
 private struct OnScreenChessBoard: View {
     @ObservedObject var board: BoardController
+    let perspective: ChessBoardPerspective
+    let isInteractive: Bool
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { context in
@@ -569,14 +597,25 @@ private struct OnScreenChessBoard: View {
                 let tick = Int(context.date.timeIntervalSinceReferenceDate / 0.25)
 
                 VStack(spacing: 0) {
-                    ForEach(0..<8, id: \.self) { rank in
+                    ForEach(0..<8, id: \.self) { displayRank in
                         HStack(spacing: 0) {
-                            ForEach(0..<8, id: \.self) { file in
-                                let notation = board.squareNotation(rankIndex: rank, fileIndex: file)
+                            ForEach(0..<8, id: \.self) { displayFile in
+                                let position = perspective.boardPosition(
+                                    displayRankIndex: displayRank,
+                                    displayFileIndex: displayFile
+                                )
+                                let notation = board.squareNotation(
+                                    rankIndex: position.rankIndex,
+                                    fileIndex: position.fileIndex
+                                )
                                 let hintPattern = board.screenHintPattern(for: notation)
+                                let isLightSquare = perspective.isLightSquare(
+                                    displayRankIndex: displayRank,
+                                    displayFileIndex: displayFile
+                                )
 
                                 ZStack {
-                                    ((rank + file).isMultiple(of: 2) ? Self.lightSquare : Self.darkSquare)
+                                    (isLightSquare ? Self.lightSquare : Self.darkSquare)
 
                                     if board.liftedSquare == notation {
                                         Rectangle()
@@ -589,8 +628,8 @@ private struct OnScreenChessBoard: View {
 
                                     if let piece = GameReplay.piece(
                                         in: board.logicalPlacement,
-                                        rankIndex: rank,
-                                        fileIndex: file
+                                        rankIndex: position.rankIndex,
+                                        fileIndex: position.fileIndex
                                     ) {
                                         Text(piece.textSymbol)
                                             .font(.system(size: squareSize * 0.74, design: .serif))
@@ -609,10 +648,18 @@ private struct OnScreenChessBoard: View {
                                             .shadow(radius: 1)
                                             .accessibilityHidden(true)
                                     }
+
+                                    coordinateLabels(
+                                        notation: notation,
+                                        displayRank: displayRank,
+                                        displayFile: displayFile,
+                                        isLightSquare: isLightSquare
+                                    )
                                 }
                                 .frame(width: squareSize, height: squareSize)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
+                                    guard isInteractive else { return }
                                     board.handleScreenSquareTap(notation)
                                 }
                                 .simultaneousGesture(
@@ -620,20 +667,29 @@ private struct OnScreenChessBoard: View {
                                         .onEnded { value in
                                             let fileOffset = Int((value.translation.width / squareSize).rounded())
                                             let rankOffset = Int((value.translation.height / squareSize).rounded())
-                                            let targetFile = file + fileOffset
-                                            let targetRank = rank + rankOffset
-                                            guard (0..<8).contains(targetFile),
-                                                  (0..<8).contains(targetRank)
+                                            let targetDisplayFile = displayFile + fileOffset
+                                            let targetDisplayRank = displayRank + rankOffset
+                                            guard isInteractive,
+                                                  (0..<8).contains(targetDisplayFile),
+                                                  (0..<8).contains(targetDisplayRank)
                                             else { return }
 
+                                            let targetPosition = perspective.boardPosition(
+                                                displayRankIndex: targetDisplayRank,
+                                                displayFileIndex: targetDisplayFile
+                                            )
                                             let target = board.squareNotation(
-                                                rankIndex: targetRank,
-                                                fileIndex: targetFile
+                                                rankIndex: targetPosition.rankIndex,
+                                                fileIndex: targetPosition.fileIndex
                                             )
                                             board.handleScreenMove(from: notation, to: target)
                                         }
                                 )
-                                .accessibilityLabel("Casilla \(notation)")
+                                .accessibilityLabel(
+                                    isInteractive
+                                        ? "Casilla \(notation)"
+                                        : "Casilla \(notation), solo lectura"
+                                )
                             }
                         }
                     }
@@ -645,7 +701,44 @@ private struct OnScreenChessBoard: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.primary.opacity(0.18), lineWidth: 1)
         }
-        .accessibilityLabel("Tablero de ajedrez interactivo")
+        .accessibilityLabel(
+            isInteractive
+                ? "Tablero de ajedrez interactivo"
+                : "Tablero de ajedrez de referencia, solo lectura"
+        )
+        .allowsHitTesting(isInteractive)
+    }
+
+    @ViewBuilder
+    private func coordinateLabels(
+        notation: String,
+        displayRank: Int,
+        displayFile: Int,
+        isLightSquare: Bool
+    ) -> some View {
+        let labelColor = isLightSquare ? Self.darkSquare : Self.lightSquare
+
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                if displayFile == 0, let rank = notation.last {
+                    Text(String(rank))
+                }
+                Spacer(minLength: 0)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                if displayRank == 7, let file = notation.first {
+                    Text(String(file))
+                }
+            }
+        }
+        .font(.system(size: 10, weight: .bold, design: .rounded))
+        .foregroundStyle(labelColor.opacity(0.9))
+        .padding(2)
+        .accessibilityHidden(true)
     }
 
     private static let lightSquare = Color(red: 0.91, green: 0.82, blue: 0.68)
@@ -688,14 +781,14 @@ private struct NewGameSetupView: View {
 
                     if mode == .solo {
                         Label(
-                            "Con Chessnut conectado ejecutarás físicamente la jugada indicada. Si está desconectado, Stockfish moverá automáticamente sus piezas en la pantalla.",
+                            "Con un tablero físico conectado ejecutarás allí la jugada indicada y la pantalla será una referencia visual. Sin conexión, jugarás directamente en la pantalla.",
                             systemImage: "cpu"
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     } else {
                         Label(
-                            "Puedes jugar con ambos bandos en el Chessnut o directamente en el tablero de la pantalla cuando esté desconectado.",
+                            "Puedes jugar con ambos bandos en el tablero físico conectado, usando la pantalla como referencia, o directamente en la pantalla sin conexión.",
                             systemImage: "person.2.fill"
                         )
                         .font(.footnote)
@@ -705,7 +798,7 @@ private struct NewGameSetupView: View {
 
                         Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
 
-                        Text("Con el Chessnut podrás devolver físicamente la jugada; en pantalla se deshará inmediatamente.")
+                        Text("Con el tablero físico podrás devolver la jugada allí; en pantalla se deshará inmediatamente.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

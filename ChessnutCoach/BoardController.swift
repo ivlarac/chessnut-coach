@@ -896,27 +896,31 @@ final class BoardController: ObservableObject {
                 } else if legalTargets.isEmpty {
                     gameStatus = "\(source.notation) no tiene movimientos legales."
                     try await client.setLEDs(.allOff)
-                } else if !client.capabilities.contains(.leds) {
-                    activeHintSummary = ""
-                    gameStatus = "Pieza levantada en \(source.notation). Este tablero no dispone de LEDs; continúa sin ayuda luminosa."
                 } else {
                     let mode = assistanceSettings.mode(for: gameSession.sideToMove)
 
                     switch mode {
                     case .off:
+                        screenHints = []
                         gameStatus = "Pieza levantada en \(source.notation). Ayuda desactivada para \(sideToMoveLabel.lowercased())."
-                        try await client.setLEDs(.allOff)
+                        if client.capabilities.contains(.leds) {
+                            try await client.setLEDs(.allOff)
+                        }
 
                     case .legalMoves:
                         let hints = AssistanceHintPlanner.hints(for: legalTargets, mode: mode)
-                        gameStatus = "Pieza levantada en \(source.notation). LEDs fijos = destinos legales."
+                        gameStatus = client.capabilities.contains(.leds)
+                            ? "Pieza levantada en \(source.notation). LEDs y puntos verdes fijos = destinos legales."
+                            : "Pieza levantada en \(source.notation). Puntos verdes fijos en el tablero virtual = destinos legales."
                         activeHintSummary = hintSummary(hints)
                         startLEDHints(hints, client: client)
 
                     case .stockfishQuality, .blunders:
                         gameStatus = "Pieza levantada en \(source.notation). Stockfish 18 está valorando sus destinos…"
                         activeHintSummary = "Stockfish 18 analizando \(source.notation)…"
-                        try await client.setLEDs(.allOff)
+                        if client.capabilities.contains(.leds) {
+                            try await client.setLEDs(.allOff)
+                        }
                         startStockfishCoaching(
                             source: source,
                             legalTargets: legalTargets,
@@ -1001,7 +1005,6 @@ final class BoardController: ObservableObject {
     private func refreshCurrentAssistanceIfNeeded() {
         guard hasActiveGame,
               let client,
-              client.capabilities.contains(.leds),
               let source = gameSession.liftedSquare,
               !gameSession.legalTargets.isEmpty,
               !gameSession.isFinished,
@@ -1013,6 +1016,9 @@ final class BoardController: ObservableObject {
         let mode = assistanceSettings.mode(for: gameSession.sideToMove)
         switch mode {
         case .off:
+            screenHints = []
+            activeHintSummary = ""
+            guard client.capabilities.contains(.leds) else { return }
             Task { [weak self] in
                 do {
                     try await client.setLEDs(.allOff)
@@ -1090,6 +1096,7 @@ final class BoardController: ObservableObject {
                 self.currentStockfishHintFEN = fen
                 self.currentStockfishHintSource = source
                 let hints = result.hints.compactMap { $0.ledHint(for: mode) }
+                self.screenHints = hints
                 self.activeHintSummary = self.stockfishHintSummary(result.hints, mode: mode)
                 self.gameStatus = self.stockfishCoachingStatus(for: mode)
                 self.startLEDHints(hints, client: client)
@@ -1104,12 +1111,15 @@ final class BoardController: ObservableObject {
                 else { return }
 
                 self.clearStockfishHints()
+                self.screenHints = []
                 self.activeHintSummary = ""
                 self.gameStatus = "No se pudo analizar \(source.notation) con Stockfish 18: \(error.localizedDescription)"
-                do {
-                    try await client.setLEDs(.allOff)
-                } catch {
-                    self.handleClientFailure(error, client: client)
+                if client.capabilities.contains(.leds) {
+                    do {
+                        try await client.setLEDs(.allOff)
+                    } catch {
+                        self.handleClientFailure(error, client: client)
+                    }
                 }
             }
         }
@@ -1118,11 +1128,9 @@ final class BoardController: ObservableObject {
     private func startLEDHints(_ hints: [LEDHint], client: any ElectronicChessBoard) {
         ledTask?.cancel()
         let generation = assistanceGeneration
+        screenHints = hints
 
-        guard client.capabilities.contains(.leds), !hints.isEmpty else {
-            activeHintSummary = ""
-            return
-        }
+        guard client.capabilities.contains(.leds), !hints.isEmpty else { return }
 
         let hasBlinkingPattern = hints.contains { $0.pattern != .steady }
 
