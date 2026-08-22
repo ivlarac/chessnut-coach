@@ -191,6 +191,21 @@ struct CurrentGameView: View {
             }
             .buttonStyle(.borderedProminent)
 
+            if board.isUndoAllowed && !board.isGameFinished && board.moveCount > 0 {
+                Button {
+                    board.undoLastMove()
+                } label: {
+                    Label("Deshacer última jugada", systemImage: "arrow.uturn.backward.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!board.canUndoMove)
+
+                Text("También puedes deshacer devolviendo físicamente la última jugada a la posición anterior.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             if !board.isGameFinished && board.moveCount > 0 {
                 Menu {
                     Button("Tablas por acuerdo") {
@@ -285,7 +300,7 @@ struct CurrentGameView: View {
                 .font(.subheadline.weight(.semibold))
                 .frame(width: 62, alignment: .leading)
             TextField("Jugador", text: selection)
-                .textInputAutocapitalization(.words)
+                .textInputAutapitalization(.words)
                 .multilineTextAlignment(.trailing)
         }
     }
@@ -419,6 +434,7 @@ private struct NewGameSetupView: View {
     @State private var humanAssistance: AssistanceMode
     @State private var whiteAssistance: AssistanceMode
     @State private var blackAssistance: AssistanceMode
+    @State private var allowUndo = false
 
     let onStart: (NewGameConfiguration) -> Void
 
@@ -533,6 +549,14 @@ private struct NewGameSetupView: View {
                             selection: $blackAssistance
                         )
                     }
+
+                    Section("Deshacer jugadas") {
+                        Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
+
+                        Text("Si está activado, podrás deshacer desde el iPhone o devolviendo físicamente la última jugada a la posición anterior.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("Nueva partida")
@@ -559,7 +583,8 @@ private struct NewGameSetupView: View {
                                 mode: mode,
                                 humanSide: humanSide,
                                 strength: StockfishStrength(level: stockfishLevel),
-                                assistance: assistance
+                                assistance: assistance,
+                                allowUndo: mode == .twoPlayer && allowUndo
                             )
                         )
                         dismiss()
