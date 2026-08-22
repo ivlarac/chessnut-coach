@@ -107,17 +107,23 @@ struct CurrentGameView: View {
                     symbolColor: .white,
                     selection: whitePlayerBinding
                 )
-                .disabled(board.isSoloGame && board.humanSide == .black)
+                .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .black)
                 Divider()
                 playerField(
                     title: "Negras",
                     symbolColor: .black,
                     selection: blackPlayerBinding
                 )
-                .disabled(board.isSoloGame && board.humanSide == .white)
+                .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .white)
             }
 
-            if board.isSoloGame {
+            if !board.hasActiveGame {
+                StatusPill(
+                    text: "Sin partida iniciada",
+                    systemImage: "pause.circle.fill",
+                    color: .secondary
+                )
+            } else if board.isSoloGame {
                 HStack {
                     StatusPill(
                         text: "Solitario · \(board.humanSide?.displayText ?? "—")",
@@ -132,12 +138,20 @@ struct CurrentGameView: View {
             }
 
             HStack(spacing: 8) {
-                metric(title: "Turno", value: board.sideToMoveLabel)
+                metric(
+                    title: "Turno",
+                    value: board.hasActiveGame ? board.sideToMoveLabel : "—"
+                )
                 metric(
                     title: "Tablero",
-                    value: board.isBoardSynchronized ? "Listo" : "Moviendo"
+                    value: board.hasActiveGame
+                        ? (board.isBoardSynchronized ? "Listo" : "Moviendo")
+                        : "Sin partida"
                 )
-                metric(title: "Resultado", value: board.gameResultLabel)
+                metric(
+                    title: "Resultado",
+                    value: board.hasActiveGame ? board.gameResultLabel : "No iniciada"
+                )
             }
 
             Text(board.gameStatus)
@@ -145,18 +159,18 @@ struct CurrentGameView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let liftedSquare = board.liftedSquare {
+            if board.hasActiveGame, let liftedSquare = board.liftedSquare {
                 Label("Pieza levantada: \(liftedSquare)", systemImage: "hand.raised")
                     .font(.subheadline.weight(.medium))
             }
 
-            if !board.legalTargets.isEmpty {
+            if board.hasActiveGame && !board.legalTargets.isEmpty {
                 Text("Destinos: \(board.legalTargets.joined(separator: ", "))")
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
             }
 
-            if board.isPromotionPending {
+            if board.hasActiveGame && board.isPromotionPending {
                 Label(
                     "Sustituye físicamente el peón por la pieza elegida para completar la promoción.",
                     systemImage: "exclamationmark.triangle.fill"
@@ -165,14 +179,14 @@ struct CurrentGameView: View {
                 .foregroundStyle(.orange)
             }
 
-            if board.isEngineThinking {
+            if board.hasActiveGame && board.isEngineThinking {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Stockfish está pensando…")
                         .font(.subheadline.weight(.medium))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            } else if let suggestion = board.engineSuggestion {
+            } else if board.hasActiveGame, let suggestion = board.engineSuggestion {
                 Label(
                     "Jugada de Stockfish: \(suggestion.displayText)",
                     systemImage: "cpu"
@@ -191,7 +205,7 @@ struct CurrentGameView: View {
             }
             .buttonStyle(.borderedProminent)
 
-            if board.isUndoAllowed && !board.isGameFinished && board.moveCount > 0 {
+            if board.hasActiveGame && board.isUndoAllowed && !board.isGameFinished && board.moveCount > 0 {
                 Button {
                     board.undoLastMove()
                 } label: {
@@ -206,7 +220,7 @@ struct CurrentGameView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if !board.isGameFinished && board.moveCount > 0 {
+            if board.hasActiveGame && !board.isGameFinished {
                 Menu {
                     Button("Tablas por acuerdo") {
                         presentFinishDialog(.draw)
@@ -233,7 +247,7 @@ struct CurrentGameView: View {
                 mode: board.whiteAssistanceMode,
                 selection: whiteAssistanceBinding
             )
-            .disabled(board.isSoloGame && board.humanSide == .black)
+            .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .black)
 
             Divider()
 
@@ -242,7 +256,7 @@ struct CurrentGameView: View {
                 mode: board.blackAssistanceMode,
                 selection: blackAssistanceBinding
             )
-            .disabled(board.isSoloGame && board.humanSide == .white)
+            .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .white)
 
             if !board.activeHintSummary.isEmpty {
                 Label(board.activeHintSummary, systemImage: "light.beacon.max")
