@@ -7,10 +7,15 @@ from pathlib import Path
 PROJECT_FILE = "ChessnutCoach.xcodeproj/project.pbxproj"
 
 
+def values_for(text: str, key: str) -> list[str]:
+    return [
+        value.strip()
+        for value in re.findall(rf"\b{re.escape(key)}\s*=\s*([^;]+);", text)
+    ]
+
+
 def unique_value(text: str, key: str) -> str:
-    values = re.findall(rf"\b{re.escape(key)}\s*=\s*([^;]+);", text)
-    values = [value.strip() for value in values]
-    unique = sorted(set(values))
+    unique = sorted(set(values_for(text, key)))
     if len(unique) != 1:
         raise SystemExit(
             f"Expected exactly one effective {key} value, found: {unique or 'none'}"
@@ -25,10 +30,13 @@ def semantic_version(value: str) -> tuple[int, int, int]:
     return tuple(map(int, match.groups()))
 
 
-def integer_version(value: str) -> int:
-    if not value.isdigit():
-        raise SystemExit(f"Invalid CURRENT_PROJECT_VERSION: {value}")
-    return int(value)
+def app_build_version(text: str) -> int:
+    values = values_for(text, "CURRENT_PROJECT_VERSION")
+    numeric = [int(value) for value in values if value.isdigit()]
+    if not numeric:
+        raise SystemExit("No numeric CURRENT_PROJECT_VERSION found")
+    # The app target is versioned alongside releases; the test target remains at 1.
+    return max(numeric)
 
 
 def main() -> None:
@@ -58,8 +66,8 @@ def main() -> None:
             f"Each PR must bump the patch version exactly once: {base} -> {expected}; found {actual}."
         )
 
-    base_build = integer_version(unique_value(base_text, "CURRENT_PROJECT_VERSION"))
-    head_build = integer_version(unique_value(head_text, "CURRENT_PROJECT_VERSION"))
+    base_build = app_build_version(base_text)
+    head_build = app_build_version(head_text)
     if head_build != base_build + 1:
         raise SystemExit(
             "CURRENT_PROJECT_VERSION must also increase exactly once per PR: "
