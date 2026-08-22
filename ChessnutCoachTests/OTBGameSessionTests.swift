@@ -649,7 +649,7 @@ final class OTBGameSessionTests: XCTestCase {
     }
 
     @MainActor
-    func testEmptySoloGameCanResumeBeforeFirstMove() {
+    func testEmptySoloGameDoesNotResumeBeforeFirstMove() {
         let library = GameLibrary(inMemory: true)
         let record = GameRecord(
             initialFEN: Position.standard.fen,
@@ -663,7 +663,7 @@ final class OTBGameSessionTests: XCTestCase {
 
         library.upsert(record)
 
-        XCTAssertEqual(library.resumableGame, record)
+        XCTAssertNil(library.resumableGame)
     }
 
     @MainActor
