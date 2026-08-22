@@ -82,6 +82,7 @@ final class BoardController: ObservableObject {
     var whiteAssistanceMode: AssistanceMode { assistanceSettings.white }
     var blackAssistanceMode: AssistanceMode { assistanceSettings.black }
     var currentGameID: UUID { gameSession.gameRecord.id }
+    var supportedBoards: [ElectronicBoardSupport] { adapterRegistry.supportedBoards }
     var boardDisplayName: String { connectedBoard?.name ?? selectedBoard?.name ?? "Tablero electrónico" }
     var supportsLEDs: Bool { client?.capabilities.contains(.leds) ?? false }
     var supportsBattery: Bool { client?.capabilities.contains(.battery) ?? false }
@@ -144,8 +145,8 @@ final class BoardController: ObservableObject {
 
     init(
         library: GameLibrary? = nil,
-        boardDiscovery: any ElectronicChessBoardDiscovery = ChessnutBoardDiscovery(),
-        adapterRegistry: ElectronicBoardAdapterRegistry = .chessnutDefault,
+        boardDiscovery: any ElectronicChessBoardDiscovery = DefaultElectronicBoardDiscovery(),
+        adapterRegistry: ElectronicBoardAdapterRegistry = .appDefault,
         preferences: UserDefaults = .standard
     ) {
         gameLibrary = library

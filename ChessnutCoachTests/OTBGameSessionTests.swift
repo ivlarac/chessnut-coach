@@ -618,6 +618,53 @@ final class OTBGameSessionTests: XCTestCase {
     }
 
 #if !SWIFT_PACKAGE
+    func testDefaultRegistryPublishesChessUpPositionSupport() throws {
+        let registry = ElectronicBoardAdapterRegistry.appDefault
+        let chessUp = try XCTUnwrap(
+            registry.supportedBoards.first {
+                $0.adapterIdentifier == ChessUpBoardAdapterFactory.adapterIdentifier
+            }
+        )
+
+        XCTAssertEqual(chessUp.name, "ChessUp")
+        XCTAssertEqual(chessUp.models, "1.ª generación")
+        XCTAssertTrue(chessUp.capabilities.contains(.positionReading))
+        XCTAssertTrue(chessUp.capabilities.contains(.realtimePosition))
+        XCTAssertFalse(chessUp.capabilities.contains(.leds))
+
+        let descriptor = ElectronicBoardDescriptor(
+            adapterIdentifier: ChessUpBoardAdapterFactory.adapterIdentifier,
+            hardwareIdentifier: UUID().uuidString,
+            name: "ChessUp",
+            manufacturer: "Bryght Labs",
+            model: "ChessUp",
+            variantIdentifier: ChessUpBoardAdapterFactory.variantIdentifier,
+            capabilities: chessUp.capabilities
+        )
+        XCTAssertTrue(try registry.makeBoard(for: descriptor) is ChessUpBoardAdapter)
+    }
+
+    func testChessUpPositionCodecMapsTheInitialPosition() throws {
+        var message = [UInt8](repeating: 64, count: 72)
+        message[0] = 0x67
+
+        let whiteBackRank: [UInt8] = [1, 2, 3, 4, 5, 3, 2, 1]
+        let blackBackRank: [UInt8] = [9, 10, 11, 12, 13, 11, 10, 9]
+        message.replaceSubrange(1...8, with: whiteBackRank)
+        message.replaceSubrange(9...16, with: Array(repeating: 0, count: 8))
+        message.replaceSubrange(49...56, with: Array(repeating: 8, count: 8))
+        message.replaceSubrange(57...64, with: blackBackRank)
+
+        XCTAssertEqual(
+            ChessUpProtocolCodec.placement(fromBoardPositionMessage: message),
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+        )
+        XCTAssertNil(ChessUpProtocolCodec.placement(fromBoardPositionMessage: [0x67]))
+
+        message[1] = 0xFF
+        XCTAssertNil(ChessUpProtocolCodec.placement(fromBoardPositionMessage: message))
+    }
+
     @MainActor
     func testCoreDataLibraryUpsertsUpdatesAndDeletesGame() {
         let library = GameLibrary(inMemory: true)

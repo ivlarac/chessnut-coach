@@ -65,6 +65,32 @@ struct ChessnutBoardAdapterFactory: ElectronicBoardAdapterFactory {
     static let adapterIdentifier = "chessnut.easylink"
     let identifier = Self.adapterIdentifier
 
+    let supportedBoards = [
+        ElectronicBoardSupport(
+            adapterIdentifier: Self.adapterIdentifier,
+            name: "Chessnut clásico",
+            models: "Air · Air+ · Go · Pro",
+            detail: "Lectura de posición, LEDs, batería e importación de partidas.",
+            capabilities: [.positionReading, .realtimePosition, .leds, .battery, .gameStorage]
+        ),
+        ElectronicBoardSupport(
+            adapterIdentifier: Self.adapterIdentifier,
+            name: "Chessnut Move",
+            models: "Move",
+            detail: "Lectura de posición, LEDs en color, batería, partidas, movimiento automático e identificación de piezas.",
+            capabilities: [
+                .positionReading,
+                .realtimePosition,
+                .leds,
+                .ledColors,
+                .battery,
+                .gameStorage,
+                .automaticMovement,
+                .pieceIdentification,
+            ]
+        ),
+    ]
+
     func canCreateBoard(for descriptor: ElectronicBoardDescriptor) -> Bool {
         descriptor.adapterIdentifier == identifier
     }
