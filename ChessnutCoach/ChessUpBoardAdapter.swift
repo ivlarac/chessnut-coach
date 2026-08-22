@@ -25,6 +25,16 @@ struct ChessUpBoardAdapterFactory: ElectronicBoardAdapterFactory {
 
     let identifier = Self.adapterIdentifier
 
+    let supportedBoards = [
+        ElectronicBoardSupport(
+            adapterIdentifier: Self.adapterIdentifier,
+            name: "ChessUp",
+            models: "1.ª generación",
+            detail: "Lectura y seguimiento de la posición. El protocolo público utilizado no permite que Chessnut Coach controle los LEDs del tablero.",
+            capabilities: [.positionReading, .realtimePosition]
+        )
+    ]
+
     func canCreateBoard(for descriptor: ElectronicBoardDescriptor) -> Bool {
         descriptor.adapterIdentifier == identifier
             && descriptor.variantIdentifier == Self.variantIdentifier

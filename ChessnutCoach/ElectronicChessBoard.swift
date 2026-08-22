@@ -27,6 +27,22 @@ struct ElectronicBoardDescriptor: Identifiable, Hashable, Sendable {
     }
 }
 
+/// User-facing compatibility metadata published by a registered adapter.
+///
+/// Keeping this next to the factory prevents the Information screen from
+/// maintaining a second, easily outdated list of supported hardware.
+struct ElectronicBoardSupport: Identifiable, Hashable, Sendable {
+    let adapterIdentifier: String
+    let name: String
+    let models: String
+    let detail: String
+    let capabilities: ElectronicBoardCapabilities
+
+    var id: String {
+        "\(adapterIdentifier):\(name)"
+    }
+}
+
 enum ElectronicBoardLEDColor: UInt8, Hashable, Sendable {
     case off
     case red
@@ -180,8 +196,13 @@ struct CompositeElectronicBoardDiscovery: ElectronicChessBoardDiscovery {
 
 protocol ElectronicBoardAdapterFactory: Sendable {
     var identifier: String { get }
+    var supportedBoards: [ElectronicBoardSupport] { get }
     func canCreateBoard(for descriptor: ElectronicBoardDescriptor) -> Bool
     func makeBoard(for descriptor: ElectronicBoardDescriptor) throws -> any ElectronicChessBoard
+}
+
+extension ElectronicBoardAdapterFactory {
+    var supportedBoards: [ElectronicBoardSupport] { [] }
 }
 
 struct ElectronicBoardAdapterRegistry: Sendable {
@@ -189,6 +210,10 @@ struct ElectronicBoardAdapterRegistry: Sendable {
 
     init(factories: [any ElectronicBoardAdapterFactory]) {
         self.factories = factories
+    }
+
+    var supportedBoards: [ElectronicBoardSupport] {
+        factories.flatMap(\.supportedBoards)
     }
 
     func makeBoard(for descriptor: ElectronicBoardDescriptor) throws -> any ElectronicChessBoard {

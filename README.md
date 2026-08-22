@@ -1,6 +1,14 @@
 # Chessnut Coach
 
-Aplicación nativa para iOS orientada a partidas OTB con un Chessnut Air y ayudas mediante los LEDs físicos del tablero.
+Aplicación nativa para iOS orientada a partidas OTB con tableros electrónicos compatibles, análisis con Stockfish 18 y ayudas mediante LEDs cuando el hardware permite controlarlos.
+
+## Tableros compatibles
+
+- Chessnut Air, Air+, Go y Pro: posición, LEDs, batería e importación de partidas.
+- Chessnut Move: posición, LEDs en color, batería, partidas, movimiento automático e identificación de piezas.
+- ChessUp de primera generación: lectura y seguimiento de posición. El protocolo público utilizado no permite controlar sus LEDs desde Chessnut Coach.
+
+ChessUp 2 no se anuncia como compatible porque su protocolo no se ha validado en esta aplicación.
 
 ## Estado actual: fase 9 — juego en solitario y análisis de partidas
 

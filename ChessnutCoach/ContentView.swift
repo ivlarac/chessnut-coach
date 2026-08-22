@@ -18,7 +18,7 @@ struct ContentView: View {
                 Label("Partidas", systemImage: "books.vertical.fill")
             }
 
-            AppInformationView()
+            AppInformationView(supportedBoards: board.supportedBoards)
                 .tabItem {
                     Label("Información", systemImage: "info.circle.fill")
                 }
@@ -28,6 +28,8 @@ struct ContentView: View {
 }
 
 private struct AppInformationView: View {
+    let supportedBoards: [ElectronicBoardSupport]
+
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }
@@ -79,10 +81,18 @@ private struct AppInformationView: View {
                 Section("Compatibilidad") {
                     LabeledContent("iOS", value: "16 o posterior")
                     LabeledContent("Motor", value: "Stockfish 18")
-                    LabeledContent("Chessnut clásico", value: "Air · Air+ · Go · Pro")
-                    LabeledContent("Chessnut Move", value: "EasyLink")
-                    Text("La comunicación con el hardware usa una capa de adaptadores preparada para añadir otros fabricantes sin acoplar la lógica de partida a su protocolo.")
-                        .font(.footnote)
+
+                    ForEach(supportedBoards) { support in
+                        VStack(alignment: .leading, spacing: 4) {
+                            LabeledContent(support.name, value: support.models)
+                            Text(support.detail)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text("Esta lista se obtiene de los adaptadores de tablero registrados por la aplicación.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
