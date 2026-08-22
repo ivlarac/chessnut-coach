@@ -18,15 +18,15 @@ final class BoardController: ObservableObject {
     @Published private(set) var batteryPercentage: Int?
 
     @Published private(set) var logicalPlacement = OTBGameSession().logicalPlacement
-    @Published private(set) var gameStatus = "Conecta el tablero y coloca las piezas en la posición inicial."
-    @Published private(set) var sideToMoveLabel = "Blancas"
+    @Published private(set) var gameStatus = "No hay ninguna partida iniciada. Pulsa «Nueva partida» para comenzar."
+    @Published private(set) var sideToMoveLabel = "—"
     @Published private(set) var liftedSquare: String?
     @Published private(set) var legalTargets: [String] = []
     @Published private(set) var lastMove: String?
     @Published private(set) var isBoardSynchronized = false
     @Published private(set) var moveHistory: [String] = []
     @Published private(set) var moveCount = 0
-    @Published private(set) var gameResultLabel = "En juego"
+    @Published private(set) var gameResultLabel = "Sin partida"
     @Published private(set) var isGameFinished = false
     @Published private(set) var isPromotionPending = false
     @Published private(set) var whitePlayerName = "Blancas"
@@ -38,6 +38,7 @@ final class BoardController: ObservableObject {
     @Published private(set) var isEngineThinking = false
     @Published private(set) var isUndoAllowed = false
     @Published private(set) var canUndoMove = false
+    @Published private(set) var hasActiveGame = false
 
     @Published private(set) var assistanceSettings = AssistanceSettings()
     @Published private(set) var activeHintSummary = ""
@@ -47,7 +48,10 @@ final class BoardController: ObservableObject {
     var currentGameID: UUID { gameSession.gameRecord.id }
     var isSoloGame: Bool { gameMode == .solo }
     var isEngineTurn: Bool {
-        gameMode == .solo && humanSide?.pieceColor != gameSession.sideToMove && !gameSession.isFinished
+        hasActiveGame
+            && gameMode == .solo
+            && humanSide?.pieceColor != gameSession.sideToMove
+            && !gameSession.isFinished
     }
 
     private var client: EasyLinkClient?
@@ -88,16 +92,24 @@ final class BoardController: ObservableObject {
         gameSession.board.position.fen
     }
 
+    private var idleGameStatus: String {
+        "No hay ninguna partida iniciada. Pulsa «Nueva partida» para comenzar."
+    }
+
     init(library: GameLibrary? = nil) {
         gameLibrary = library
 
         if let savedGame = library?.resumableGame,
            let restoredSession = try? OTBGameSession(restoring: savedGame) {
             gameSession = restoredSession
+            hasActiveGame = true
             gameStatus = "Partida recuperada. Conecta el tablero y coloca la posición guardada para continuar."
         }
 
         publishGameState()
+        if !hasActiveGame {
+            gameStatus = idleGameStatus
+        }
     }
 
     func connect() {
@@ -228,8 +240,8 @@ final class BoardController: ObservableObject {
         let black = configuration.mode == .solo
             ? (configuration.humanSide == .black ? humanName : engineName)
             : normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
-        if !gameSession.isFinished,
-           (!gameSession.moves.isEmpty || gameSession.gameRecord.mode == .solo) {
+
+        if hasActiveGame && !gameSession.isFinished {
             if gameSession.moves.isEmpty {
                 gameLibrary?.delete(gameSession.gameRecord)
             } else {
@@ -247,6 +259,7 @@ final class BoardController: ObservableObject {
             engineName: configuration.mode == .solo ? engineName : nil,
             allowUndo: configuration.mode == .twoPlayer && configuration.allowUndo
         )
+        hasActiveGame = true
         lastProcessedPlacement = ""
         activeHintSummary = ""
         publishGameState()
@@ -272,21 +285,23 @@ final class BoardController: ObservableObject {
     }
 
     func setWhitePlayerName(_ name: String) {
-        guard !(gameMode == .solo && humanSide == .black) else { return }
+        guard !(hasActiveGame && gameMode == .solo && humanSide == .black) else { return }
         whitePlayerName = name
         gameSession.updatePlayers(white: name, black: blackPlayerName)
         persistCurrentGameIfNeeded()
     }
 
     func setBlackPlayerName(_ name: String) {
-        guard !(gameMode == .solo && humanSide == .white) else { return }
+        guard !(hasActiveGame && gameMode == .solo && humanSide == .white) else { return }
         blackPlayerName = name
         gameSession.updatePlayers(white: whitePlayerName, black: name)
         persistCurrentGameIfNeeded()
     }
 
     func undoLastMove() {
-        guard let undoneMove = gameSession.undoLastMove(awaitPhysicalRestore: true) else { return }
+        guard hasActiveGame,
+              let undoneMove = gameSession.undoLastMove(awaitPhysicalRestore: true)
+        else { return }
 
         invalidateTransientAssistance(turnOffLEDs: isConnected)
         cancelEngineMoveRequest(clearSuggestion: true)
@@ -296,49 +311,32 @@ final class BoardController: ObservableObject {
     }
 
     func resignCurrentSide() {
-        guard !gameSession.isFinished else { return }
+        guard hasActiveGame, !gameSession.isFinished else { return }
         let resigningColor = gameMode == .solo
             ? (humanSide?.pieceColor ?? gameSession.sideToMove)
             : gameSession.sideToMove
-        let result = gameSession.resign(color: resigningColor)
-        publishGameState()
+        _ = gameSession.resign(color: resigningColor)
         persistCurrentGameIfNeeded()
-        gameStatus = result.displayText
-        turnOffAutomaticLEDs()
-        cancelEngineMoveRequest(clearSuggestion: true)
+        returnToIdleState()
     }
 
     func agreeDraw() {
-        guard !gameSession.isFinished else { return }
-        let result = gameSession.agreeDraw()
-        publishGameState()
+        guard hasActiveGame, !gameSession.isFinished else { return }
+        _ = gameSession.agreeDraw()
         persistCurrentGameIfNeeded()
-        gameStatus = result.displayText
-        turnOffAutomaticLEDs()
-        cancelEngineMoveRequest(clearSuggestion: true)
+        returnToIdleState()
     }
 
     func abortGame() {
-        guard !gameSession.isFinished else { return }
+        guard hasActiveGame, !gameSession.isFinished else { return }
         gameSession.abort()
-        publishGameState()
         persistCurrentGameIfNeeded()
-        gameStatus = "Partida cancelada sin resultado."
-        turnOffAutomaticLEDs()
-        cancelEngineMoveRequest(clearSuggestion: true)
+        returnToIdleState()
     }
 
     func deleteArchivedGame(_ game: GameRecord) {
-        if game.id == gameSession.gameRecord.id {
-            invalidateTransientAssistance(turnOffLEDs: isConnected)
-            cancelEngineMoveRequest(clearSuggestion: true)
-            gameSession.reset(
-                whitePlayer: normalizedNonEnginePlayerName(whitePlayerName, fallback: "Blancas"),
-                blackPlayer: normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
-            )
-            lastProcessedPlacement = ""
-            publishGameState()
-            gameStatus = "Partida borrada. Coloca las piezas en la posición inicial para comenzar otra."
+        if hasActiveGame && game.id == gameSession.gameRecord.id {
+            returnToIdleState()
         }
 
         gameLibrary?.delete(game)
@@ -519,7 +517,9 @@ final class BoardController: ObservableObject {
         lastProcessedPlacement = ""
         isBoardSynchronized = false
         activeHintSummary = ""
-        gameStatus = "Conexión activa. Esperando la posición actual del Chessnut para recuperar la partida."
+        gameStatus = hasActiveGame
+            ? "Conexión activa. Esperando la posición actual del Chessnut para recuperar la partida."
+            : idleGameStatus
     }
 
     private func probeConnectionAndRequestFreshSnapshot(shouldRequestSnapshot: Bool) {
@@ -553,7 +553,9 @@ final class BoardController: ObservableObject {
                     } else {
                         self.isBoardSynchronized = false
                         self.status = "Conectado · esperando posición actual del tablero…"
-                        self.gameStatus = "Mueve o levanta una pieza para validar la posición física tras volver a la app."
+                        self.gameStatus = self.hasActiveGame
+                            ? "Mueve o levanta una pieza para validar la posición física tras volver a la app."
+                            : self.idleGameStatus
                     }
                 }
             } catch is CancellationError {
@@ -613,8 +615,19 @@ final class BoardController: ObservableObject {
         guard placement == latestPhysicalPlacement else { return }
 
         lastProcessedPlacement = placement
-
         invalidateTransientAssistance(turnOffLEDs: false)
+
+        guard hasActiveGame else {
+            isBoardSynchronized = false
+            gameStatus = idleGameStatus
+            do {
+                try await client.setLEDs(.allOff)
+            } catch {
+                status = "Conexión BLE interrumpida: \(error.localizedDescription)"
+                handleClientFailure(error, client: client)
+            }
+            return
+        }
 
         let wasEngineTurn = isEngineTurn
         let physicalPlacement = placement.split(separator: " ").first.map(String.init) ?? placement
@@ -641,6 +654,17 @@ final class BoardController: ObservableObject {
             persistAfterUndo()
         default:
             break
+        }
+
+        if case .moveCompleted = event, gameSession.isFinished {
+            do {
+                try await client.setLEDs(.allOff)
+            } catch {
+                status = "Conexión BLE interrumpida: \(error.localizedDescription)"
+                handleClientFailure(error, client: client)
+            }
+            returnToIdleState()
+            return
         }
 
         do {
@@ -707,11 +731,7 @@ final class BoardController: ObservableObject {
 
             case let .moveCompleted(move):
                 clearStockfishHints()
-                if gameSession.isFinished {
-                    gameStatus = "Registrado \(move.san). \(gameSession.result.displayText)"
-                } else {
-                    gameStatus = "Registrado \(move.san) (\(move.coordinateNotation)). Turno de \(sideToMoveLabel.lowercased())."
-                }
+                gameStatus = "Registrado \(move.san) (\(move.coordinateNotation)). Turno de \(sideToMoveLabel.lowercased())."
                 try await client.setLEDs(.allOff)
                 if isEngineTurn {
                     scheduleEngineMoveIfNeeded(client: client)
@@ -782,7 +802,8 @@ final class BoardController: ObservableObject {
     }
 
     private func refreshCurrentAssistanceIfNeeded() {
-        guard let client,
+        guard hasActiveGame,
+              let client,
               let source = gameSession.liftedSquare,
               !gameSession.legalTargets.isEmpty,
               !gameSession.isFinished,
@@ -822,7 +843,8 @@ final class BoardController: ObservableObject {
         prewarmTask?.cancel()
         prewarmTask = nil
 
-        guard !gameSession.isFinished,
+        guard hasActiveGame,
+              !gameSession.isFinished,
               !isEngineTurn,
               gameSession.liftedSquare == nil,
               assistanceSettings.mode(for: gameSession.sideToMove).requiresStockfishAnalysis
@@ -857,7 +879,8 @@ final class BoardController: ObservableObject {
                 )
                 try Task.checkCancellation()
                 guard let self else { return }
-                guard self.assistanceGeneration == generation,
+                guard self.hasActiveGame,
+                      self.assistanceGeneration == generation,
                       self.logicalFEN == fen,
                       self.gameSession.liftedSquare == source,
                       self.assistanceSettings.mode(for: self.gameSession.sideToMove) == mode,
@@ -876,7 +899,8 @@ final class BoardController: ObservableObject {
                 // The piece was returned/moved or a newer assistance request won.
             } catch {
                 guard let self, !Task.isCancelled else { return }
-                guard self.assistanceGeneration == generation,
+                guard self.hasActiveGame,
+                      self.assistanceGeneration == generation,
                       self.logicalFEN == fen,
                       self.gameSession.liftedSquare == source
                 else { return }
@@ -1120,6 +1144,23 @@ final class BoardController: ObservableObject {
         engineStrength = gameSession.gameRecord.engineStrength
         isUndoAllowed = gameSession.gameRecord.mode == .twoPlayer && gameSession.gameRecord.allowUndo
         canUndoMove = gameSession.canUndoLastMove
+
+        if !hasActiveGame {
+            sideToMoveLabel = "—"
+            liftedSquare = nil
+            legalTargets = []
+            lastMove = nil
+            isBoardSynchronized = false
+            moveCount = 0
+            moveHistory = []
+            gameResultLabel = "Sin partida"
+            isGameFinished = false
+            isPromotionPending = false
+            humanSide = nil
+            engineStrength = nil
+            isUndoAllowed = false
+            canUndoMove = false
+        }
     }
 
     private func formattedMoveHistory(_ moves: [GameMoveRecord]) -> [String] {
@@ -1140,16 +1181,34 @@ final class BoardController: ObservableObject {
     }
 
     private func persistCurrentGameIfNeeded() {
-        guard !gameSession.moves.isEmpty || gameSession.gameRecord.mode == .solo else { return }
+        guard hasActiveGame, !gameSession.moves.isEmpty else { return }
         gameLibrary?.upsert(gameSession.gameRecord)
     }
 
     private func persistAfterUndo() {
+        guard hasActiveGame else { return }
         if gameSession.gameRecord.mode == .twoPlayer && gameSession.moves.isEmpty {
             gameLibrary?.delete(gameSession.gameRecord)
         } else {
             persistCurrentGameIfNeeded()
         }
+    }
+
+    private func returnToIdleState() {
+        invalidateTransientAssistance(turnOffLEDs: isConnected)
+        cancelEngineMoveRequest(clearSuggestion: true)
+
+        let idleWhite = normalizedNonEnginePlayerName(whitePlayerName, fallback: "Blancas")
+        let idleBlack = normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
+
+        hasActiveGame = false
+        gameSession.reset(
+            whitePlayer: idleWhite,
+            blackPlayer: idleBlack
+        )
+        lastProcessedPlacement = ""
+        publishGameState()
+        gameStatus = idleGameStatus
     }
 
     private func normalizedHumanName(_ value: String) -> String {
@@ -1196,6 +1255,8 @@ final class BoardController: ObservableObject {
         isBoardSynchronized = false
         clearStockfishHints()
         activeHintSummary = ""
-        gameStatus = "Conecta el tablero para continuar la partida."
+        gameStatus = hasActiveGame
+            ? "Conecta el tablero para continuar la partida."
+            : idleGameStatus
     }
 }
