@@ -1,3 +1,4 @@
+import ChessKit
 import Foundation
 
 enum ReplayPieceColor: Equatable, Sendable {
@@ -107,6 +108,26 @@ enum GameReplay {
         "n": ReplayPiece(symbol: "♞", color: .black),
         "p": ReplayPiece(symbol: "♟", color: .black),
     ]
+}
+
+enum ChessMoveNotation {
+    static func san(forUCI uci: String, inFEN fen: String) -> String? {
+        guard let expectedMove = OTBExpectedMove(uci: uci),
+              let position = Position(fen: fen)
+        else { return nil }
+
+        var board = Board(position: position)
+        guard let move = board.move(pieceAt: expectedMove.from, to: expectedMove.to) else {
+            return nil
+        }
+
+        if case let .promotion(promotionMove) = board.state {
+            guard let promotion = expectedMove.promotion else { return nil }
+            return board.completePromotion(of: promotionMove, to: promotion).san
+        }
+
+        return move.san
+    }
 }
 
 enum PGNExporter {
