@@ -18,6 +18,16 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Validate one patch version bump
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF" --depth=1
+          python3 Scripts/check_pr_version_bump.py "$BASE_REF"
+
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
