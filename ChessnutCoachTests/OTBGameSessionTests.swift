@@ -133,6 +133,22 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertNil(StockfishStrength.full.elo)
     }
 
+    func testStockfishLevelsCoverLimitedRangeAndMaximumStrength() {
+        XCTAssertEqual(StockfishStrength(level: 0).level, 1)
+        XCTAssertEqual(StockfishStrength(level: 1).elo, StockfishStrength.minimumElo)
+        XCTAssertEqual(StockfishStrength(level: 19).elo, StockfishStrength.maximumElo)
+        XCTAssertEqual(StockfishStrength(level: 20), .full)
+        XCTAssertEqual(StockfishStrength(level: 99), .full)
+        XCTAssertEqual(StockfishStrength(level: 7).level, 7)
+    }
+
+    func testManualAndRandomHumanColorChoicesResolveCorrectly() {
+        XCTAssertEqual(HumanSideChoice.white.resolvedSide(randomValue: false), .white)
+        XCTAssertEqual(HumanSideChoice.black.resolvedSide(randomValue: true), .black)
+        XCTAssertEqual(HumanSideChoice.random.resolvedSide(randomValue: true), .white)
+        XCTAssertEqual(HumanSideChoice.random.resolvedSide(randomValue: false), .black)
+    }
+
     func testCaptureIsRecorded() {
         var session = OTBGameSession()
         var physicalBoard = Board()
@@ -648,6 +664,26 @@ final class OTBGameSessionTests: XCTestCase {
         library.upsert(record)
 
         XCTAssertEqual(library.resumableGame, record)
+    }
+
+    @MainActor
+    func testNewSoloGameAppliesHumanAssistanceAndEngineLevel() {
+        let controller = BoardController(library: GameLibrary(inMemory: true))
+
+        controller.newGame(
+            configuration: NewGameConfiguration(
+                mode: .solo,
+                humanSide: .black,
+                strength: StockfishStrength(level: 7),
+                assistance: AssistanceSettings(white: .off, black: .blunders)
+            )
+        )
+
+        XCTAssertTrue(controller.isSoloGame)
+        XCTAssertEqual(controller.humanSide, .black)
+        XCTAssertEqual(controller.engineStrength?.level, 7)
+        XCTAssertEqual(controller.whiteAssistanceMode, .off)
+        XCTAssertEqual(controller.blackAssistanceMode, .blunders)
     }
 
     func testMonitoredTransportBroadcastsDisconnectWithoutHidingItFromClientStream() async {

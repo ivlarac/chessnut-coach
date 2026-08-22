@@ -25,6 +25,15 @@ struct CurrentGameView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Chessnut Coach")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        isNewGamePresented = true
+                    } label: {
+                        Label("Nueva partida", systemImage: "plus.circle.fill")
+                    }
+                }
+            }
             .confirmationDialog(
                 finishDialogTitle,
                 isPresented: $isFinishDialogPresented,
@@ -33,7 +42,10 @@ struct CurrentGameView: View {
                 finishDialogButtons
             }
             .sheet(isPresented: $isNewGamePresented) {
-                NewGameSetupView { configuration in
+                NewGameSetupView(
+                    whiteAssistance: board.whiteAssistanceMode,
+                    blackAssistance: board.blackAssistanceMode
+                ) { configuration in
                     board.newGame(configuration: configuration)
                 }
             }
@@ -174,11 +186,10 @@ struct CurrentGameView: View {
             Button {
                 isNewGamePresented = true
             } label: {
-                Label("Nueva partida", systemImage: "plus.circle.fill")
+                Label("Nueva partida · Persona o Stockfish", systemImage: "plus.circle.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!board.isConnected)
 
             if !board.isGameFinished && board.moveCount > 0 {
                 Menu {
@@ -403,17 +414,30 @@ struct CurrentGameView: View {
 private struct NewGameSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var mode = GameMode.twoPlayer
-    @State private var humanSide = PlayerSide.white
-    @State private var elo = 1_600.0
-    @State private var useFullStrength = false
+    @State private var sideChoice = HumanSideChoice.white
+    @State private var stockfishLevel = 4
+    @State private var humanAssistance: AssistanceMode
+    @State private var whiteAssistance: AssistanceMode
+    @State private var blackAssistance: AssistanceMode
 
     let onStart: (NewGameConfiguration) -> Void
+
+    init(
+        whiteAssistance: AssistanceMode,
+        blackAssistance: AssistanceMode,
+        onStart: @escaping (NewGameConfiguration) -> Void
+    ) {
+        _humanAssistance = State(initialValue: whiteAssistance)
+        _whiteAssistance = State(initialValue: whiteAssistance)
+        _blackAssistance = State(initialValue: blackAssistance)
+        self.onStart = onStart
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Modo") {
-                    Picker("Tipo de partida", selection: $mode) {
+                Section("¿Contra quién quieres jugar?") {
+                    Picker("Rival", selection: $mode) {
                         ForEach(GameMode.allCases) { mode in
                             Text(mode.displayText).tag(mode)
                         }
@@ -421,44 +445,93 @@ private struct NewGameSetupView: View {
                     .pickerStyle(.segmented)
 
                     if mode == .solo {
-                        Picker("Jugar con", selection: $humanSide) {
-                            ForEach(PlayerSide.allCases) { side in
-                                Text(side.displayText).tag(side)
-                            }
-                        }
-                        .pickerStyle(.segmented)
+                        Label(
+                            "Stockfish propondrá sus jugadas y tú las ejecutarás físicamente en el Chessnut.",
+                            systemImage: "cpu"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    } else {
+                        Label(
+                            "Blancas y negras juegan físicamente en el mismo tablero.",
+                            systemImage: "person.2.fill"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     }
                 }
 
                 if mode == .solo {
-                    Section("Nivel de Stockfish") {
-                        Toggle("Máxima potencia", isOn: $useFullStrength)
+                    Section("Tu color") {
+                        Picker("Color", selection: $sideChoice) {
+                            ForEach(HumanSideChoice.allCases) { choice in
+                                Text(choice.displayText).tag(choice)
+                            }
+                        }
+                        .pickerStyle(.segmented)
 
-                        if !useFullStrength {
-                            Slider(
-                                value: $elo,
-                                in: Double(StockfishStrength.minimumElo)...Double(StockfishStrength.maximumElo),
-                                step: 10
-                            )
-                            LabeledContent("Nivel", value: "Elo \(Int(elo))")
-                        } else {
-                            Text("Stockfish jugará sin limitación Elo.")
+                        if sideChoice == .random {
+                            Text("El color se sorteará al pulsar Empezar y se mostrará en la partida actual.")
+                                .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
+                    }
 
-                        Text("El rango Elo disponible es el expuesto por Stockfish 18 (1320–3190), además de su fuerza máxima.")
+                    Section("Nivel de Stockfish") {
+                        Stepper(
+                            value: $stockfishLevel,
+                            in: StockfishStrength.minimumLevel...StockfishStrength.maximumLevel
+                        ) {
+                            LabeledContent("Nivel", value: "\(stockfishLevel)")
+                        }
+
+                        Slider(
+                            value: Binding(
+                                get: { Double(stockfishLevel) },
+                                set: { stockfishLevel = Int($0.rounded()) }
+                            ),
+                            in: Double(StockfishStrength.minimumLevel)...Double(StockfishStrength.maximumLevel),
+                            step: 1
+                        )
+
+                        HStack {
+                            Text("1 · Menor")
+                            Spacer()
+                            Text("20 · Máxima")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        Text(StockfishStrength(level: stockfishLevel).technicalDetailText)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
 
-                    Section {
+                    Section("Ayuda para ti") {
+                        setupAssistancePicker(
+                            title: "Tu ayuda",
+                            selection: $humanAssistance
+                        )
+
                         Label(
-                            humanSide == .black
-                                ? "Stockfish moverá primero. La app mostrará la jugada y la iluminará en el tablero."
-                                : "Después de cada jugada tuya, la app mostrará e iluminará la respuesta de Stockfish.",
+                            soloTurnExplanation,
                             systemImage: "lightbulb.max"
                         )
                         .font(.footnote)
+                    }
+                } else {
+                    Section("Ayuda por bando") {
+                        setupAssistancePicker(
+                            title: "Blancas",
+                            selection: $whiteAssistance
+                        )
+
+                        Divider()
+
+                        setupAssistancePicker(
+                            title: "Negras",
+                            selection: $blackAssistance
+                        )
                     }
                 }
             }
@@ -470,13 +543,23 @@ private struct NewGameSetupView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Empezar") {
+                        let humanSide = sideChoice.resolvedSide()
+                        let assistance = mode == .solo
+                            ? AssistanceSettings(
+                                white: humanSide == .white ? humanAssistance : .off,
+                                black: humanSide == .black ? humanAssistance : .off
+                            )
+                            : AssistanceSettings(
+                                white: whiteAssistance,
+                                black: blackAssistance
+                            )
+
                         onStart(
                             NewGameConfiguration(
                                 mode: mode,
                                 humanSide: humanSide,
-                                strength: useFullStrength
-                                    ? .full
-                                    : StockfishStrength(elo: Int(elo))
+                                strength: StockfishStrength(level: stockfishLevel),
+                                assistance: assistance
                             )
                         )
                         dismiss()
@@ -484,6 +567,38 @@ private struct NewGameSetupView: View {
                     .fontWeight(.semibold)
                 }
             }
+        }
+    }
+
+    private var soloTurnExplanation: String {
+        switch sideChoice {
+        case .white:
+            "Después de cada jugada tuya, la app mostrará e iluminará la respuesta de Stockfish."
+        case .black:
+            "Stockfish moverá primero. La app mostrará la jugada y la iluminará en el tablero."
+        case .random:
+            "Si te corresponden negras, Stockfish moverá primero. La app mostrará e iluminará cada jugada de la máquina."
+        }
+    }
+
+    private func setupAssistancePicker(
+        title: String,
+        selection: Binding<AssistanceMode>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Picker(title, selection: selection) {
+                Text("No").tag(AssistanceMode.off)
+                Text("Legales").tag(AssistanceMode.legalMoves)
+                Text("Calidad").tag(AssistanceMode.stockfishQuality)
+                Text("Blunders").tag(AssistanceMode.blunders)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text(selection.wrappedValue.detailText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 }
