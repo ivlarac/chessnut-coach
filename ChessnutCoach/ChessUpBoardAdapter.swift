@@ -110,11 +110,11 @@ private final class ChessUpDiscoverySession: NSObject, CBCentralManagerDelegate,
 }
 
 private enum ChessUpBLE {
-    // Nordic UART Service used by ChessUp. These UUIDs are also present in
-    // Bryght Labs' public ChessUp PC reference implementation.
-    static let service = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
-    static let rx = CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
-    static let tx = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+    // Nordic UART Service used by ChessUp. Keep the UUIDs as Sendable strings:
+    // CBUUID itself is not Sendable under Swift 6 strict concurrency.
+    static let serviceUUIDString = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+    static let rxUUIDString = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+    static let txUUIDString = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
     static let requestBoardPosition: [UInt8] = [0x67]
     static let moveAcknowledgement: [UInt8] = [0x21]
@@ -354,7 +354,7 @@ final class ChessUpBoardAdapter: NSObject, ElectronicChessBoard, CBCentralManage
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         central.stopScan()
         peripheral.delegate = self
-        peripheral.discoverServices([ChessUpBLE.service])
+        peripheral.discoverServices([CBUUID(string: ChessUpBLE.serviceUUIDString)])
     }
 
     func centralManager(
@@ -395,11 +395,18 @@ final class ChessUpBoardAdapter: NSObject, ElectronicChessBoard, CBCentralManage
             return
         }
 
-        guard let service = peripheral.services?.first(where: { $0.uuid == ChessUpBLE.service }) else {
+        let serviceUUID = CBUUID(string: ChessUpBLE.serviceUUIDString)
+        guard let service = peripheral.services?.first(where: { $0.uuid == serviceUUID }) else {
             failPendingConnection(ChessUpBoardError.serviceUnavailable)
             return
         }
-        peripheral.discoverCharacteristics([ChessUpBLE.rx, ChessUpBLE.tx], for: service)
+        peripheral.discoverCharacteristics(
+            [
+                CBUUID(string: ChessUpBLE.rxUUIDString),
+                CBUUID(string: ChessUpBLE.txUUIDString),
+            ],
+            for: service
+        )
     }
 
     func peripheral(
@@ -412,8 +419,10 @@ final class ChessUpBoardAdapter: NSObject, ElectronicChessBoard, CBCentralManage
             return
         }
 
-        rxCharacteristic = service.characteristics?.first(where: { $0.uuid == ChessUpBLE.rx })
-        txCharacteristic = service.characteristics?.first(where: { $0.uuid == ChessUpBLE.tx })
+        let rxUUID = CBUUID(string: ChessUpBLE.rxUUIDString)
+        let txUUID = CBUUID(string: ChessUpBLE.txUUIDString)
+        rxCharacteristic = service.characteristics?.first(where: { $0.uuid == rxUUID })
+        txCharacteristic = service.characteristics?.first(where: { $0.uuid == txUUID })
 
         guard rxCharacteristic != nil, let txCharacteristic else {
             failPendingConnection(ChessUpBoardError.characteristicsUnavailable)
@@ -427,7 +436,7 @@ final class ChessUpBoardAdapter: NSObject, ElectronicChessBoard, CBCentralManage
         didUpdateNotificationStateFor characteristic: CBCharacteristic,
         error: (any Error)?
     ) {
-        guard characteristic.uuid == ChessUpBLE.tx else { return }
+        guard characteristic.uuid == CBUUID(string: ChessUpBLE.txUUIDString) else { return }
 
         if let error {
             failPendingConnection(ChessUpBoardError.connectionFailed(error.localizedDescription))
@@ -449,7 +458,7 @@ final class ChessUpBoardAdapter: NSObject, ElectronicChessBoard, CBCentralManage
         didUpdateValueFor characteristic: CBCharacteristic,
         error: (any Error)?
     ) {
-        guard characteristic.uuid == ChessUpBLE.tx else { return }
+        guard characteristic.uuid == CBUUID(string: ChessUpBLE.txUUIDString) else { return }
         guard error == nil, let data = characteristic.value else { return }
 
         receiveBuffer.append(contentsOf: data)
