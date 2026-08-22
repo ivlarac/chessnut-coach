@@ -300,7 +300,7 @@ struct CurrentGameView: View {
                 .font(.subheadline.weight(.semibold))
                 .frame(width: 62, alignment: .leading)
             TextField("Jugador", text: selection)
-                .textInputAutapitalization(.words)
+                .textInputAutocapitalization(.words)
                 .multilineTextAlignment(.trailing)
         }
     }
