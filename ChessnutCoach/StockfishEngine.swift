@@ -161,7 +161,7 @@ actor StockfishEngine {
         let succeeded = requestedFEN.withCString { fenPointer in
             bestMove.withUnsafeMutableBufferPointer { bestBuffer in
                 error.withUnsafeMutableBufferPointer { errorBuffer in
-                    CCStockfishSearch(
+                    CCStockfishSearchV2(
                         native,
                         fenPointer,
                         nodeLimit ?? defaultNodeLimit,

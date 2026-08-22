@@ -32,7 +32,7 @@ CCStockfishEngine *CCStockfishCreate(
 void CCStockfishDestroy(CCStockfishEngine *engine);
 void CCStockfishStop(CCStockfishEngine *engine);
 
-bool CCStockfishSearch(
+bool CCStockfishSearchV2(
     CCStockfishEngine *engine,
     const char *fen,
     uint64_t nodeLimit,
