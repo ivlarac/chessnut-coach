@@ -119,7 +119,7 @@ final class BoardController: ObservableObject {
     private var currentStockfishHintFEN: String?
     private var currentStockfishHintSource: Square?
     private var shouldMaintainConnection = false
-    private var lifecycle = ChessnutSessionLifecycle()
+    private var lifecycle = ElectronicBoardSessionLifecycle()
     private var assistanceGeneration = 0
     private var engineMoveGeneration = 0
     private var physicalSnapshotRevision = 0
@@ -365,7 +365,7 @@ final class BoardController: ObservableObject {
         }
     }
 
-    func handleAppPhase(_ phase: ChessnutAppPhase) {
+    func handleAppPhase(_ phase: ElectronicBoardAppPhase) {
         let directive = lifecycle.transition(to: phase)
 
         if directive.invalidateTransientAssistance {

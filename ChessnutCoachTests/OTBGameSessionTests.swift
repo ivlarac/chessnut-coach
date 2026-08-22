@@ -340,7 +340,7 @@ final class OTBGameSessionTests: XCTestCase {
     }
 
     func testLifecycleInvalidatesTransientWorkOnlyAtBackgroundAndResumeBoundaries() {
-        var lifecycle = ChessnutSessionLifecycle()
+        var lifecycle = ElectronicBoardSessionLifecycle()
 
         XCTAssertEqual(lifecycle.transition(to: .active), .none)
         XCTAssertEqual(lifecycle.transition(to: .inactive), .none)
