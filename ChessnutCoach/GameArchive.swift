@@ -46,12 +46,14 @@ enum GameReplay {
     }
 
     private static let pieces: [Character: ReplayPiece] = [
-        "K": ReplayPiece(symbol: "♔", color: .white),
-        "Q": ReplayPiece(symbol: "♕", color: .white),
-        "R": ReplayPiece(symbol: "♖", color: .white),
-        "B": ReplayPiece(symbol: "♗", color: .white),
-        "N": ReplayPiece(symbol: "♘", color: .white),
-        "P": ReplayPiece(symbol: "♙", color: .white),
+        // Use the filled glyphs for both colours and tint them in SwiftUI.
+        // The outlined Unicode white-piece glyphs have poor contrast on iPhone.
+        "K": ReplayPiece(symbol: "♚", color: .white),
+        "Q": ReplayPiece(symbol: "♛", color: .white),
+        "R": ReplayPiece(symbol: "♜", color: .white),
+        "B": ReplayPiece(symbol: "♝", color: .white),
+        "N": ReplayPiece(symbol: "♞", color: .white),
+        "P": ReplayPiece(symbol: "♟", color: .white),
         "k": ReplayPiece(symbol: "♚", color: .black),
         "q": ReplayPiece(symbol: "♛", color: .black),
         "r": ReplayPiece(symbol: "♜", color: .black),
