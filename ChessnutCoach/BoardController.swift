@@ -36,6 +36,8 @@ final class BoardController: ObservableObject {
     @Published private(set) var engineStrength: StockfishStrength?
     @Published private(set) var engineSuggestion: SoloEngineSuggestion?
     @Published private(set) var isEngineThinking = false
+    @Published private(set) var isUndoAllowed = false
+    @Published private(set) var canUndoMove = false
 
     @Published private(set) var assistanceSettings = AssistanceSettings()
     @Published private(set) var activeHintSummary = ""
@@ -242,7 +244,8 @@ final class BoardController: ObservableObject {
             mode: configuration.mode,
             humanSide: configuration.mode == .solo ? configuration.humanSide : nil,
             engineStrength: configuration.mode == .solo ? configuration.strength : nil,
-            engineName: configuration.mode == .solo ? engineName : nil
+            engineName: configuration.mode == .solo ? engineName : nil,
+            allowUndo: configuration.mode == .twoPlayer && configuration.allowUndo
         )
         lastProcessedPlacement = ""
         activeHintSummary = ""
@@ -280,6 +283,16 @@ final class BoardController: ObservableObject {
         blackPlayerName = name
         gameSession.updatePlayers(white: whitePlayerName, black: name)
         persistCurrentGameIfNeeded()
+    }
+
+    func undoLastMove() {
+        guard let undoneMove = gameSession.undoLastMove(awaitPhysicalRestore: true) else { return }
+
+        invalidateTransientAssistance(turnOffLEDs: isConnected)
+        cancelEngineMoveRequest(clearSuggestion: true)
+        publishGameState()
+        persistAfterUndo()
+        gameStatus = "Jugada \(undoneMove.san) deshecha. Devuelve físicamente las piezas a la posición anterior para continuar."
     }
 
     func resignCurrentSide() {
@@ -621,8 +634,13 @@ final class BoardController: ObservableObject {
             cancelEngineMoveRequest(clearSuggestion: true)
         }
         publishGameState()
-        if case .moveCompleted = event {
+        switch event {
+        case .moveCompleted:
             persistCurrentGameIfNeeded()
+        case .moveUndone:
+            persistAfterUndo()
+        default:
+            break
         }
 
         do {
@@ -700,6 +718,12 @@ final class BoardController: ObservableObject {
                 } else {
                     scheduleStockfishPrewarmIfNeeded()
                 }
+
+            case let .moveUndone(move):
+                clearStockfishHints()
+                gameStatus = "Jugada \(move.san) deshecha automáticamente. Turno de \(sideToMoveLabel.lowercased())."
+                try await client.setLEDs(.allOff)
+                scheduleStockfishPrewarmIfNeeded()
 
             case let .promotionRequired(square, legalKinds):
                 clearStockfishHints()
@@ -1094,6 +1118,8 @@ final class BoardController: ObservableObject {
         gameMode = gameSession.gameRecord.mode
         humanSide = gameSession.gameRecord.humanSide
         engineStrength = gameSession.gameRecord.engineStrength
+        isUndoAllowed = gameSession.gameRecord.mode == .twoPlayer && gameSession.gameRecord.allowUndo
+        canUndoMove = gameSession.canUndoLastMove
     }
 
     private func formattedMoveHistory(_ moves: [GameMoveRecord]) -> [String] {
@@ -1116,6 +1142,14 @@ final class BoardController: ObservableObject {
     private func persistCurrentGameIfNeeded() {
         guard !gameSession.moves.isEmpty || gameSession.gameRecord.mode == .solo else { return }
         gameLibrary?.upsert(gameSession.gameRecord)
+    }
+
+    private func persistAfterUndo() {
+        if gameSession.gameRecord.mode == .twoPlayer && gameSession.moves.isEmpty {
+            gameLibrary?.delete(gameSession.gameRecord)
+        } else {
+            persistCurrentGameIfNeeded()
+        }
     }
 
     private func normalizedHumanName(_ value: String) -> String {
