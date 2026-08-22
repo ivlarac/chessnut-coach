@@ -33,6 +33,7 @@ let package = Package(
                 "GameLibraryView.swift",
                 "Info.plist",
                 "MonitoredEasyLinkTransport.swift",
+                "ChessnutBoardAdapter.swift",
                 "StockfishEngine.swift",
                 "StockfishBridge.h",
                 "StockfishBridge.mm",
@@ -42,7 +43,8 @@ let package = Package(
             sources: [
                 "GameArchive.swift",
                 "GameModels.swift",
-                "OTBGameSession.swift"
+                "OTBGameSession.swift",
+                "ElectronicChessBoard.swift"
             ]
         ),
         .testTarget(

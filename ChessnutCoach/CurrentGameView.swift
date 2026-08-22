@@ -73,7 +73,7 @@ struct CurrentGameView: View {
     }
 
     private var connectionCard: some View {
-        CoachCard("Chessnut Air", systemImage: "dot.radiowaves.left.and.right") {
+        CoachCard(board.boardDisplayName, systemImage: "dot.radiowaves.left.and.right") {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     StatusPill(
@@ -95,26 +95,75 @@ struct CurrentGameView: View {
                 }
             }
 
-            HStack {
-                if board.isConnected {
-                    Button("Actualizar batería") {
-                        board.refreshBattery()
+            if board.isConnected {
+                if !board.supportsLEDs {
+                    Label(
+                        "Este tablero no ofrece LEDs; la partida y la detección de jugadas siguen disponibles sin ayudas luminosas.",
+                        systemImage: "lightbulb.slash"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    if board.supportsBattery {
+                        Button("Actualizar batería") {
+                            board.refreshBattery()
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
 
                     Button("Desconectar", role: .destructive) {
                         board.disconnect()
                     }
                     .buttonStyle(.bordered)
-                } else {
-                    Button {
-                        board.connect()
-                    } label: {
-                        Label("Conectar tablero", systemImage: "link")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
+            } else {
+                if board.isScanningForBoards {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Buscando tableros cercanos…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if !board.discoveredBoards.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(board.discoveredBoards) { device in
+                            Button {
+                                board.connect(to: device)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(device.name)
+                                            .font(.subheadline.weight(.semibold))
+                                        Text(device.manufacturer)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "link")
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+
+                Button {
+                    board.discoveredBoards.isEmpty ? board.connect() : board.scanForBoards()
+                } label: {
+                    Label(
+                        board.discoveredBoards.isEmpty ? "Buscar tableros" : "Buscar de nuevo",
+                        systemImage: "antenna.radiowaves.left.and.right"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(board.isScanningForBoards)
             }
         }
     }
@@ -134,7 +183,7 @@ struct CurrentGameView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             } else {
-                Text("Inicia una partida para jugar directamente aquí mientras el Chessnut esté desconectado.")
+                Text("Inicia una partida para jugar directamente aquí mientras el tablero físico esté desconectado.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -311,7 +360,7 @@ struct CurrentGameView: View {
                 mode: board.whiteAssistanceMode,
                 selection: whiteAssistanceBinding
             )
-            .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .black)
+            .disabled((board.hasActiveGame && board.isSoloGame && board.humanSide == .black) || (board.isConnected && !board.supportsLEDs))
 
             Divider()
 
@@ -320,7 +369,13 @@ struct CurrentGameView: View {
                 mode: board.blackAssistanceMode,
                 selection: blackAssistanceBinding
             )
-            .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .white)
+            .disabled((board.hasActiveGame && board.isSoloGame && board.humanSide == .white) || (board.isConnected && !board.supportsLEDs))
+
+            if board.isConnected && !board.supportsLEDs {
+                Text("Las ayudas por LED no están disponibles con el tablero conectado actualmente.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
             if !board.activeHintSummary.isEmpty {
                 Label(board.activeHintSummary, systemImage: "light.beacon.max")
