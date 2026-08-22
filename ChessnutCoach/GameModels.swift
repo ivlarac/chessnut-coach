@@ -1,28 +1,28 @@
 import ChessKit
 import Foundation
 
-enum ChessnutAppPhase: Equatable, Sendable {
+enum ElectronicBoardAppPhase: Equatable, Sendable {
     case active
     case inactive
     case background
 }
 
-struct ChessnutLifecycleDirective: Equatable, Sendable {
+struct ElectronicBoardLifecycleDirective: Equatable, Sendable {
     let invalidateTransientAssistance: Bool
     let requestFreshBoardSnapshot: Bool
     let probeConnection: Bool
 
-    static let none = ChessnutLifecycleDirective(
+    static let none = ElectronicBoardLifecycleDirective(
         invalidateTransientAssistance: false,
         requestFreshBoardSnapshot: false,
         probeConnection: false
     )
 }
 
-struct ChessnutSessionLifecycle: Equatable, Sendable {
-    private(set) var phase: ChessnutAppPhase = .active
+struct ElectronicBoardSessionLifecycle: Equatable, Sendable {
+    private(set) var phase: ElectronicBoardAppPhase = .active
 
-    mutating func transition(to newPhase: ChessnutAppPhase) -> ChessnutLifecycleDirective {
+    mutating func transition(to newPhase: ElectronicBoardAppPhase) -> ElectronicBoardLifecycleDirective {
         guard newPhase != phase else { return .none }
         phase = newPhase
 
@@ -30,13 +30,13 @@ struct ChessnutSessionLifecycle: Equatable, Sendable {
         case .inactive:
             return .none
         case .background:
-            return ChessnutLifecycleDirective(
+            return ElectronicBoardLifecycleDirective(
                 invalidateTransientAssistance: true,
                 requestFreshBoardSnapshot: false,
                 probeConnection: false
             )
         case .active:
-            return ChessnutLifecycleDirective(
+            return ElectronicBoardLifecycleDirective(
                 invalidateTransientAssistance: true,
                 requestFreshBoardSnapshot: true,
                 probeConnection: true
