@@ -42,7 +42,7 @@ Las fases 7 y 8 se entregan juntas en una única PR:
 - la numeración respeta partidas que comienzan con negras y el número de movimiento incluido en el FEN;
 - el texto de jugadas mantiene SAN de capturas, enroques, en passant, promociones, jaques y mates, con líneas de hasta 80 caracteres;
 - **Guardar** y **Compartir** entregan un archivo `.pgn` real reconocido por iOS;
-- la navegación se divide en **Jugar**, **Partidas** y **Diagnóstico**;
+- las fases 7 y 8 introdujeron una navegación separada para **Jugar**, **Partidas** y **Diagnóstico**;
 - la pantalla principal prioriza conexión, estado de partida, jugadores, ayuda y últimas jugadas;
 - el diagnóstico de Stockfish, posiciones y LEDs permanece disponible sin ocupar la pantalla de juego;
 - la app incorpora un icono propio y una identidad visual coherente;
@@ -94,7 +94,7 @@ git submodule update --init --recursive
 ## Ejecutar la fase 9 en un iPhone
 
 1. Actualiza tu copia local del repositorio.
-2. Selecciona la rama `feature/solo-stockfish-game-analysis`.
+2. Selecciona `main` o la rama de la PR de fase 9 que quieras probar.
 3. Abre `ChessnutCoach.xcodeproj`.
 4. Selecciona tu Personal Team si Xcode lo solicita.
 5. Selecciona el iPhone como destino y ejecuta la app.
@@ -208,14 +208,14 @@ Antes del merge de esta PR:
 
 1. instala la rama `feature/final-pgn-app-polish` sobre la versión anterior, sin borrar datos;
 2. confirma que aparece el icono nuevo y que las partidas anteriores continúan en **Partidas**;
-3. recorre las tres pestañas y comprueba que **Jugar**, **Partidas** y **Diagnóstico** mantienen su estado;
+3. recorre **Jugar** y **Partidas** y comprueba que ambas pantallas mantienen su estado;
 4. conecta el Chessnut Air desde **Jugar** y verifica estado y batería;
 5. juega una partida que contenga una captura y, si es posible, enroque o promoción;
 6. comprueba que ayuda por bando, LEDs, historial y finalización funcionan igual que antes;
 7. abre la partida en **Partidas**, recórrela completa y confirma colores y posiciones;
 8. guarda el PGN en Archivos y confirma extensión `.pgn`, cabeceras, SAN y resultado;
 9. comparte el PGN por la hoja de iOS y confirma que el receptor recibe un archivo, no texto suelto;
-10. abre **Diagnóstico**, analiza las dos FEN de ejemplo y prueba los patrones LED;
+10. finaliza una partida, ábrela desde **Partidas** y confirma que el análisis Stockfish y la barra lateral cambian al recorrer sus movimientos;
 11. cierra y vuelve a abrir la app para confirmar la recuperación de la partida y de la biblioteca.
 
 ## Fase 9: juego en solitario
