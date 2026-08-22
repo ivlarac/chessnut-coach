@@ -17,6 +17,9 @@ struct CurrentGameView: View {
             ScrollView {
                 LazyVStack(spacing: 16) {
                     connectionCard
+                    if !board.isConnected {
+                        screenBoardCard
+                    }
                     gameCard
                     assistanceCard
                     historyCard
@@ -40,6 +43,23 @@ struct CurrentGameView: View {
                 titleVisibility: .visible
             ) {
                 finishDialogButtons
+            }
+            .confirmationDialog(
+                "Elige pieza para la promoción",
+                isPresented: Binding(
+                    get: { board.screenPromotionRequest != nil },
+                    set: { if !$0 { board.cancelScreenPromotion() } }
+                ),
+                titleVisibility: .visible
+            ) {
+                ForEach(ScreenPromotionChoice.allCases) { choice in
+                    Button(choice.displayText) {
+                        board.completeScreenPromotion(choice)
+                    }
+                }
+                Button("Cancelar", role: .cancel) {
+                    board.cancelScreenPromotion()
+                }
             }
             .sheet(isPresented: $isNewGamePresented) {
                 NewGameSetupView(
@@ -99,6 +119,37 @@ struct CurrentGameView: View {
         }
     }
 
+    private var screenBoardCard: some View {
+        CoachCard("Tablero en pantalla", systemImage: "checkerboard.rectangle") {
+            OnScreenChessBoard(board: board)
+                .aspectRatio(1, contentMode: .fit)
+
+            if board.hasActiveGame {
+                Label(
+                    board.isEngineTurn
+                        ? "Stockfish moverá automáticamente sus piezas cuando termine de calcular."
+                        : "Toca una pieza y después su destino, o arrástrala directamente.",
+                    systemImage: board.isEngineTurn ? "cpu" : "hand.tap"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            } else {
+                Text("Inicia una partida para jugar directamente aquí mientras el Chessnut esté desconectado.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !board.screenHints.isEmpty {
+                Label(
+                    "Los puntos verdes reproducen el patrón de ayuda: fijo, parpadeo lento o parpadeo rápido.",
+                    systemImage: "circle.fill"
+                )
+                .font(.footnote)
+                .foregroundStyle(.green)
+            }
+        }
+    }
+
     private var gameCard: some View {
         CoachCard("Partida actual", systemImage: "checkerboard.rectangle") {
             VStack(spacing: 12) {
@@ -145,7 +196,7 @@ struct CurrentGameView: View {
                 metric(
                     title: "Tablero",
                     value: board.hasActiveGame
-                        ? (board.isBoardSynchronized ? "Listo" : "Moviendo")
+                        ? (!board.isConnected ? "Pantalla" : (board.isBoardSynchronized ? "Listo" : "Moviendo"))
                         : "Sin partida"
                 )
                 metric(
@@ -160,8 +211,13 @@ struct CurrentGameView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if board.hasActiveGame, let liftedSquare = board.liftedSquare {
-                Label("Pieza levantada: \(liftedSquare)", systemImage: "hand.raised")
-                    .font(.subheadline.weight(.medium))
+                Label(
+                    board.isConnected
+                        ? "Pieza levantada: \(liftedSquare)"
+                        : "Pieza seleccionada: \(liftedSquare)",
+                    systemImage: board.isConnected ? "hand.raised" : "hand.tap"
+                )
+                .font(.subheadline.weight(.medium))
             }
 
             if board.hasActiveGame && !board.legalTargets.isEmpty {
@@ -172,7 +228,9 @@ struct CurrentGameView: View {
 
             if board.hasActiveGame && board.isPromotionPending {
                 Label(
-                    "Sustituye físicamente el peón por la pieza elegida para completar la promoción.",
+                    board.isConnected
+                        ? "Sustituye físicamente el peón por la pieza elegida para completar la promoción."
+                        : "Elige en pantalla la pieza a la que quieres promocionar.",
                     systemImage: "exclamationmark.triangle.fill"
                 )
                 .font(.footnote)
@@ -188,7 +246,9 @@ struct CurrentGameView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else if board.hasActiveGame, let suggestion = board.engineSuggestion {
                 Label(
-                    "Jugada de Stockfish: \(suggestion.displayText)",
+                    board.isConnected
+                        ? "Jugada de Stockfish: \(suggestion.displayText)"
+                        : "Stockfish: \(suggestion.displayText)",
                     systemImage: "cpu"
                 )
                 .font(.headline)
@@ -215,9 +275,13 @@ struct CurrentGameView: View {
                 .buttonStyle(.bordered)
                 .disabled(!board.canUndoMove)
 
-                Text("También puedes deshacer devolviendo físicamente la última jugada a la posición anterior.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                Text(
+                    board.isConnected
+                        ? "También puedes deshacer devolviendo físicamente la última jugada a la posición anterior."
+                        : "En modo pantalla el movimiento se deshace inmediatamente."
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
 
             if board.hasActiveGame && !board.isGameFinished {
@@ -440,6 +504,99 @@ struct CurrentGameView: View {
     }
 }
 
+private struct OnScreenChessBoard: View {
+    @ObservedObject var board: BoardController
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { context in
+            GeometryReader { geometry in
+                let squareSize = geometry.size.width / 8
+                let tick = Int(context.date.timeIntervalSinceReferenceDate / 0.25)
+
+                VStack(spacing: 0) {
+                    ForEach(0..<8, id: \.self) { rank in
+                        HStack(spacing: 0) {
+                            ForEach(0..<8, id: \.self) { file in
+                                let notation = board.squareNotation(rankIndex: rank, fileIndex: file)
+                                let hintPattern = board.screenHintPattern(for: notation)
+
+                                ZStack {
+                                    ((rank + file).isMultiple(of: 2) ? Self.lightSquare : Self.darkSquare)
+
+                                    if board.liftedSquare == notation {
+                                        Rectangle()
+                                            .fill(Color.coachAccent.opacity(0.28))
+                                            .overlay {
+                                                Rectangle()
+                                                    .stroke(Color.coachAccent, lineWidth: 2)
+                                            }
+                                    }
+
+                                    if let piece = GameReplay.piece(
+                                        in: board.logicalPlacement,
+                                        rankIndex: rank,
+                                        fileIndex: file
+                                    ) {
+                                        Text(piece.textSymbol)
+                                            .font(.system(size: squareSize * 0.74, design: .serif))
+                                            .foregroundStyle(piece.color == .white ? Color.white : Color.black)
+                                            .shadow(
+                                                color: (piece.color == .white ? Color.black : Color.white).opacity(0.7),
+                                                radius: 1
+                                            )
+                                            .minimumScaleFactor(0.5)
+                                    }
+
+                                    if let hintPattern, hintPattern.isLit(at: tick) {
+                                        Circle()
+                                            .fill(Color.green)
+                                            .frame(width: squareSize * 0.24, height: squareSize * 0.24)
+                                            .shadow(radius: 1)
+                                            .accessibilityHidden(true)
+                                    }
+                                }
+                                .frame(width: squareSize, height: squareSize)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    board.handleScreenSquareTap(notation)
+                                }
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 10)
+                                        .onEnded { value in
+                                            let fileOffset = Int((value.translation.width / squareSize).rounded())
+                                            let rankOffset = Int((value.translation.height / squareSize).rounded())
+                                            let targetFile = file + fileOffset
+                                            let targetRank = rank + rankOffset
+                                            guard (0..<8).contains(targetFile),
+                                                  (0..<8).contains(targetRank)
+                                            else { return }
+
+                                            let target = board.squareNotation(
+                                                rankIndex: targetRank,
+                                                fileIndex: targetFile
+                                            )
+                                            board.handleScreenMove(from: notation, to: target)
+                                        }
+                                )
+                                .accessibilityLabel("Casilla \(notation)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.primary.opacity(0.18), lineWidth: 1)
+        }
+        .accessibilityLabel("Tablero de ajedrez interactivo")
+    }
+
+    private static let lightSquare = Color(red: 0.91, green: 0.82, blue: 0.68)
+    private static let darkSquare = Color(red: 0.49, green: 0.34, blue: 0.23)
+}
+
 private struct NewGameSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var mode = GameMode.twoPlayer
@@ -476,14 +633,14 @@ private struct NewGameSetupView: View {
 
                     if mode == .solo {
                         Label(
-                            "Stockfish propondrá sus jugadas y tú las ejecutarás físicamente en el Chessnut.",
+                            "Con Chessnut conectado ejecutarás físicamente la jugada indicada. Si está desconectado, Stockfish moverá automáticamente sus piezas en la pantalla.",
                             systemImage: "cpu"
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     } else {
                         Label(
-                            "Blancas y negras juegan físicamente en el mismo tablero.",
+                            "Puedes jugar con ambos bandos en el Chessnut o directamente en el tablero de la pantalla cuando esté desconectado.",
                             systemImage: "person.2.fill"
                         )
                         .font(.footnote)
@@ -493,7 +650,7 @@ private struct NewGameSetupView: View {
 
                         Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
 
-                        Text("Podrás deshacer desde el iPhone o devolviendo físicamente la última jugada a la posición anterior.")
+                        Text("Con el Chessnut podrás devolver físicamente la jugada; en pantalla se deshará inmediatamente.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -612,11 +769,11 @@ private struct NewGameSetupView: View {
     private var soloTurnExplanation: String {
         switch sideChoice {
         case .white:
-            "Después de cada jugada tuya, la app mostrará e iluminará la respuesta de Stockfish."
+            "Después de cada jugada tuya, Stockfish responderá; en pantalla la respuesta se ejecutará automáticamente."
         case .black:
-            "Stockfish moverá primero. La app mostrará la jugada y la iluminará en el tablero."
+            "Stockfish moverá primero; en pantalla su primera jugada se ejecutará automáticamente."
         case .random:
-            "Si te corresponden negras, Stockfish moverá primero. La app mostrará e iluminará cada jugada de la máquina."
+            "Si te corresponden negras, Stockfish moverá primero. En modo pantalla sus jugadas se ejecutan automáticamente."
         }
     }
 
