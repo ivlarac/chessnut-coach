@@ -149,6 +149,35 @@ protocol ElectronicChessBoardDiscovery: Sendable {
     func scan() -> AsyncStream<ElectronicBoardDescriptor>
 }
 
+/// Multiplexes any number of vendor-specific discovery implementations into one
+/// stream. BoardController therefore does not need to know which manufacturers
+/// are supported by the application.
+struct CompositeElectronicBoardDiscovery: ElectronicChessBoardDiscovery {
+    let discoveries: [any ElectronicChessBoardDiscovery]
+
+    func scan() -> AsyncStream<ElectronicBoardDescriptor> {
+        AsyncStream { continuation in
+            let task = Task {
+                await withTaskGroup(of: Void.self) { group in
+                    for discovery in discoveries {
+                        group.addTask {
+                            for await descriptor in discovery.scan() {
+                                guard !Task.isCancelled else { return }
+                                continuation.yield(descriptor)
+                            }
+                        }
+                    }
+                }
+                continuation.finish()
+            }
+
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+}
+
 protocol ElectronicBoardAdapterFactory: Sendable {
     var identifier: String { get }
     func canCreateBoard(for descriptor: ElectronicBoardDescriptor) -> Bool

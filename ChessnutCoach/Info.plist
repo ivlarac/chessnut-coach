@@ -21,7 +21,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Chessnut Coach necesita Bluetooth para conectarse al tablero Chessnut.</string>
+	<string>Chessnut Coach necesita Bluetooth para conectarse a tableros electrónicos compatibles como Chessnut y ChessUp.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

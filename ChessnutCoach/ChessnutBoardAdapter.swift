@@ -1,7 +1,7 @@
 import EasyLinkSwiftSDK
 import Foundation
 
-struct ChessnutBoardDiscovery: ElectronicChessBoardDiscovery {
+struct ChessnutEasyLinkBoardDiscovery: ElectronicChessBoardDiscovery {
     func scan() -> AsyncStream<ElectronicBoardDescriptor> {
         AsyncStream { continuation in
             let task = Task {
@@ -37,6 +37,30 @@ struct ChessnutBoardDiscovery: ElectronicChessBoardDiscovery {
     }
 }
 
+/// Application-level discovery. Add another vendor here and its adapter factory
+/// to `ElectronicBoardAdapterRegistry.appDefault` to extend hardware support.
+struct DefaultElectronicBoardDiscovery: ElectronicChessBoardDiscovery {
+    private let composite: CompositeElectronicBoardDiscovery
+
+    init(
+        discoveries: [any ElectronicChessBoardDiscovery] = [
+            ChessnutEasyLinkBoardDiscovery(),
+            ChessUpBoardDiscovery(),
+        ]
+    ) {
+        composite = CompositeElectronicBoardDiscovery(discoveries: discoveries)
+    }
+
+    func scan() -> AsyncStream<ElectronicBoardDescriptor> {
+        composite.scan()
+    }
+}
+
+// Compatibility shim for BoardController's existing default initializer. The
+// concrete discovery is now multi-vendor; callers that specifically want only
+// Chessnut can inject ChessnutEasyLinkBoardDiscovery instead.
+typealias ChessnutBoardDiscovery = DefaultElectronicBoardDiscovery
+
 struct ChessnutBoardAdapterFactory: ElectronicBoardAdapterFactory {
     static let adapterIdentifier = "chessnut.easylink"
     let identifier = Self.adapterIdentifier
@@ -65,8 +89,19 @@ struct ChessnutBoardAdapterFactory: ElectronicBoardAdapterFactory {
 }
 
 extension ElectronicBoardAdapterRegistry {
+    static var appDefault: Self {
+        Self(
+            factories: [
+                ChessnutBoardAdapterFactory(),
+                ChessUpBoardAdapterFactory(),
+            ]
+        )
+    }
+
+    // Kept so existing dependency-injection call sites remain source-compatible.
+    // The application's default registry is now deliberately multi-vendor.
     static var chessnutDefault: Self {
-        Self(factories: [ChessnutBoardAdapterFactory()])
+        appDefault
     }
 }
 
