@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           if grep -q 'import EasyLinkSwiftSDK' ChessnutCoach/BoardController.swift; then
-            python3 Scripts/apply_generic_board_refactor.py
+            python3 Scripts/run_generic_board_refactor.py
           else
             echo 'Migration already applied'
           fi
