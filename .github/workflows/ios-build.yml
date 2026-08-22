@@ -32,6 +32,7 @@ jobs:
           else
             echo 'Migration already applied'
           fi
+          python3 Scripts/fix_generic_board_output.py
 
       - name: Commit generic board migration
         if: github.event_name == 'pull_request'
