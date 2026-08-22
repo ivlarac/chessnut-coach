@@ -2,6 +2,8 @@
 
 Aplicación nativa para iOS orientada a partidas OTB con tableros electrónicos compatibles, análisis con Stockfish 18 y ayudas mediante LEDs cuando el hardware permite controlarlos.
 
+El tablero virtual permanece siempre visible y puede girarse para colocar blancas o negras abajo. Sin conexión física es interactivo; con un tablero Bluetooth conectado pasa a ser una referencia de solo lectura que refleja la posición y las ayudas configuradas, incluso cuando el hardware no dispone de LEDs controlables.
+
 ## Tableros compatibles
 
 - Chessnut Air, Air+, Go y Pro: posición, LEDs, batería e importación de partidas.

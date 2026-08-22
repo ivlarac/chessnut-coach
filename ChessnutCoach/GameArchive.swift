@@ -14,6 +14,52 @@ struct ReplayPiece: Equatable, Sendable {
     var textSymbol: String { symbol + "\u{FE0E}" }
 }
 
+enum ChessBoardPerspective: Equatable, Sendable {
+    case whiteAtBottom
+    case blackAtBottom
+
+    var opposite: Self {
+        switch self {
+        case .whiteAtBottom: .blackAtBottom
+        case .blackAtBottom: .whiteAtBottom
+        }
+    }
+
+    func boardPosition(
+        displayRankIndex: Int,
+        displayFileIndex: Int
+    ) -> ChessBoardSquarePosition {
+        precondition((0..<8).contains(displayRankIndex))
+        precondition((0..<8).contains(displayFileIndex))
+
+        return switch self {
+        case .whiteAtBottom:
+            ChessBoardSquarePosition(
+                rankIndex: displayRankIndex,
+                fileIndex: displayFileIndex
+            )
+        case .blackAtBottom:
+            ChessBoardSquarePosition(
+                rankIndex: 7 - displayRankIndex,
+                fileIndex: 7 - displayFileIndex
+            )
+        }
+    }
+
+    func isLightSquare(displayRankIndex: Int, displayFileIndex: Int) -> Bool {
+        let position = boardPosition(
+            displayRankIndex: displayRankIndex,
+            displayFileIndex: displayFileIndex
+        )
+        return (position.rankIndex + position.fileIndex).isMultiple(of: 2)
+    }
+}
+
+struct ChessBoardSquarePosition: Equatable, Sendable {
+    let rankIndex: Int
+    let fileIndex: Int
+}
+
 enum GameReplay {
     static func fen(for record: GameRecord, afterPly ply: Int) -> String {
         guard ply > 0, !record.moves.isEmpty else { return record.initialFEN }

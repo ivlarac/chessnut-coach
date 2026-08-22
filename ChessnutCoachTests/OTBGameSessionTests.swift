@@ -558,6 +558,79 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))
     }
 
+    func testChessBoardPerspectiveRotatesTheEntireBoardAndCanBeFlippedRepeatedly() {
+        XCTAssertEqual(
+            ChessBoardPerspective.whiteAtBottom.boardPosition(
+                displayRankIndex: 0,
+                displayFileIndex: 0
+            ),
+            ChessBoardSquarePosition(rankIndex: 0, fileIndex: 0)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.whiteAtBottom.boardPosition(
+                displayRankIndex: 7,
+                displayFileIndex: 7
+            ),
+            ChessBoardSquarePosition(rankIndex: 7, fileIndex: 7)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.blackAtBottom.boardPosition(
+                displayRankIndex: 0,
+                displayFileIndex: 0
+            ),
+            ChessBoardSquarePosition(rankIndex: 7, fileIndex: 7)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.blackAtBottom.boardPosition(
+                displayRankIndex: 0,
+                displayFileIndex: 7
+            ),
+            ChessBoardSquarePosition(rankIndex: 7, fileIndex: 0)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.blackAtBottom.boardPosition(
+                displayRankIndex: 7,
+                displayFileIndex: 0
+            ),
+            ChessBoardSquarePosition(rankIndex: 0, fileIndex: 7)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.blackAtBottom.boardPosition(
+                displayRankIndex: 7,
+                displayFileIndex: 7
+            ),
+            ChessBoardSquarePosition(rankIndex: 0, fileIndex: 0)
+        )
+
+        for perspective in [
+            ChessBoardPerspective.whiteAtBottom,
+            ChessBoardPerspective.blackAtBottom,
+        ] {
+            for displayRank in 0..<8 {
+                for displayFile in 0..<8 {
+                    let position = perspective.boardPosition(
+                        displayRankIndex: displayRank,
+                        displayFileIndex: displayFile
+                    )
+                    XCTAssertEqual(
+                        perspective.isLightSquare(
+                            displayRankIndex: displayRank,
+                            displayFileIndex: displayFile
+                        ),
+                        (position.rankIndex + position.fileIndex).isMultiple(of: 2)
+                    )
+                }
+            }
+        }
+
+        var perspective = ChessBoardPerspective.whiteAtBottom
+        for _ in 0..<100 {
+            perspective = perspective.opposite
+        }
+        XCTAssertEqual(perspective, .whiteAtBottom)
+        XCTAssertEqual(perspective.opposite, .blackAtBottom)
+    }
+
     func testLEDFrameComposerKeepsSteadyWhileBlinkPatternsChange() {
         let hints = [
             LEDHint(square: .a1, pattern: .steady),
@@ -835,15 +908,23 @@ final class OTBGameSessionTests: XCTestCase {
         fake.emitPosition(initial)
         try await waitUntil { controller.isBoardSynchronized }
 
+        controller.handleScreenMove(from: "e2", to: "e4")
+        XCTAssertEqual(controller.moveCount, 0)
+        XCTAssertEqual(controller.logicalPlacement, initial)
+
         let liftedE2 = "rnbqkbnr/pppppppp/8/8/8/8/PPPP1PPP/RNBQKBNR"
         fake.emitPosition(liftedE2)
-        try await waitUntil { controller.liftedSquare == "e2" }
+        try await waitUntil {
+            controller.liftedSquare == "e2" && controller.screenHints.count == 2
+        }
 
         XCTAssertTrue(controller.isConnected)
         XCTAssertFalse(controller.supportsLEDs)
         XCTAssertEqual(controller.legalTargets, ["e3", "e4"])
-        XCTAssertTrue(controller.activeHintSummary.isEmpty)
-        XCTAssertTrue(controller.gameStatus.contains("no dispone de LEDs"))
+        XCTAssertEqual(controller.screenHints.map(\.square.notation).sorted(), ["e3", "e4"])
+        XCTAssertTrue(controller.screenHints.allSatisfy { $0.pattern == .steady })
+        XCTAssertFalse(controller.activeHintSummary.isEmpty)
+        XCTAssertTrue(controller.gameStatus.contains("tablero virtual"))
     }
 
     @MainActor
