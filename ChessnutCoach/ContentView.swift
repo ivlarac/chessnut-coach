@@ -81,6 +81,20 @@ private struct AppInformationView: View {
                     LabeledContent("Motor", value: "Stockfish 18")
                     LabeledContent("Tablero", value: "Chessnut Air")
                 }
+
+                Section("Licencia y autoría") {
+                    LabeledContent("Licencia", value: "Apache 2.0")
+                    LabeledContent("Autoría", value: "ivlarac")
+
+                    Link(
+                        "Repositorio original",
+                        destination: URL(string: "https://github.com/ivlarac/chessnut-coach")!
+                    )
+
+                    Text("© 2026 ivlarac. El código original de Chessnut Coach puede utilizarse, modificarse y redistribuirse bajo Apache License 2.0, conservando los avisos de licencia, copyright y atribución aplicables. Los componentes de terceros mantienen sus propias licencias.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("Información")
         }
