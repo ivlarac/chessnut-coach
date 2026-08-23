@@ -529,41 +529,200 @@ final class OTBGameSessionTests: XCTestCase {
     }
 
     func testReplayBoardUsesFENColorAndAssetMappingForEveryPiece() throws {
-        let fen = Position.standard.fen
-        let blackBackRankAssets = [
-            "black_rook", "black_knight", "black_bishop", "black_queen",
-            "black_king", "black_bishop", "black_knight", "black_rook",
-        ]
-        let whiteBackRankAssets = [
-            "white_rook", "white_knight", "white_bishop", "white_queen",
-            "white_king", "white_bishop", "white_knight", "white_rook",
-        ]
+    let fen = Position.standard.fen
+    let blackBackRankAssets = [
+        "black_rook", "black_knight", "black_bishop", "black_queen",
+        "black_king", "black_bishop", "black_knight", "black_rook",
+    ]
+    let whiteBackRankAssets = [
+        "white_rook", "white_knight", "white_bishop", "white_queen",
+        "white_king", "white_bishop", "white_knight", "white_rook",
+    ]
 
-        for file in 0..<8 {
-            let blackBackRank = try XCTUnwrap(
-                GameReplay.piece(in: fen, rankIndex: 0, fileIndex: file)
-            )
-            let blackPawn = try XCTUnwrap(
-                GameReplay.piece(in: fen, rankIndex: 1, fileIndex: file)
-            )
-            let whitePawn = try XCTUnwrap(
-                GameReplay.piece(in: fen, rankIndex: 6, fileIndex: file)
-            )
-            let whiteBackRank = try XCTUnwrap(
-                GameReplay.piece(in: fen, rankIndex: 7, fileIndex: file)
-            )
+    for file in 0..<8 {
+        let blackBackRank = try XCTUnwrap(
+            GameReplay.piece(in: fen, rankIndex: 0, fileIndex: file)
+        )
+        let blackPawn = try XCTUnwrap(
+            GameReplay.piece(in: fen, rankIndex: 1, fileIndex: file)
+        )
+        let whitePawn = try XCTUnwrap(
+            GameReplay.piece(in: fen, rankIndex: 6, fileIndex: file)
+        )
+        let whiteBackRank = try XCTUnwrap(
+            GameReplay.piece(in: fen, rankIndex: 7, fileIndex: file)
+        )
 
-            XCTAssertEqual(blackBackRank.color, .black)
-            XCTAssertEqual(blackPawn.color, .black)
-            XCTAssertEqual(whitePawn.color, .white)
-            XCTAssertEqual(whiteBackRank.color, .white)
-            XCTAssertEqual(blackBackRank.assetName, blackBackRankAssets[file])
-            XCTAssertEqual(blackPawn.assetName, "black_pawn")
-            XCTAssertEqual(whitePawn.assetName, "white_pawn")
-            XCTAssertEqual(whiteBackRank.assetName, whiteBackRankAssets[file])
+        XCTAssertEqual(blackBackRank.color, .black)
+        XCTAssertEqual(blackPawn.color, .black)
+        XCTAssertEqual(whitePawn.color, .white)
+        XCTAssertEqual(whiteBackRank.color, .white)
+        XCTAssertEqual(blackBackRank.assetName, blackBackRankAssets[file])
+        XCTAssertEqual(blackPawn.assetName, "black_pawn")
+        XCTAssertEqual(whitePawn.assetName, "white_pawn")
+        XCTAssertEqual(whiteBackRank.assetName, whiteBackRankAssets[file])
+    }
+
+    XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))
+}
+
+    func testChessBoardPerspectiveRotatesTheEntireBoardAndCanBeFlippedRepeatedly() {
+        XCTAssertEqual(
+            ChessBoardPerspective.whiteAtBottom.boardPosition(
+                displayRankIndex: 0,
+                displayFileIndex: 0
+            ),
+            ChessBoardSquarePosition(rankIndex: 0, fileIndex: 0)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.whiteAtBottom.boardPosition(
+                displayRankIndex: 7,
+                displayFileIndex: 7
+            ),
+            ChessBoardSquarePosition(rankIndex: 7, fileIndex: 7)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.blackAtBottom.boardPosition(
+                displayRankIndex: 0,
+                displayFileIndex: 0
+            ),
+            ChessBoardSquarePosition(rankIndex: 7, fileIndex: 7)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.blackAtBottom.boardPosition(
+                displayRankIndex: 0,
+                displayFileIndex: 7
+            ),
+            ChessBoardSquarePosition(rankIndex: 7, fileIndex: 0)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.blackAtBottom.boardPosition(
+                displayRankIndex: 7,
+                displayFileIndex: 0
+            ),
+            ChessBoardSquarePosition(rankIndex: 0, fileIndex: 7)
+        )
+        XCTAssertEqual(
+            ChessBoardPerspective.blackAtBottom.boardPosition(
+                displayRankIndex: 7,
+                displayFileIndex: 7
+            ),
+            ChessBoardSquarePosition(rankIndex: 0, fileIndex: 0)
+        )
+
+        for perspective in [
+            ChessBoardPerspective.whiteAtBottom,
+            ChessBoardPerspective.blackAtBottom,
+        ] {
+            for displayRank in 0..<8 {
+                for displayFile in 0..<8 {
+                    let position = perspective.boardPosition(
+                        displayRankIndex: displayRank,
+                        displayFileIndex: displayFile
+                    )
+                    XCTAssertEqual(
+                        perspective.isLightSquare(
+                            displayRankIndex: displayRank,
+                            displayFileIndex: displayFile
+                        ),
+                        (position.rankIndex + position.fileIndex).isMultiple(of: 2)
+                    )
+                }
+            }
         }
 
-        XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))
+        var perspective = ChessBoardPerspective.whiteAtBottom
+        for _ in 0..<100 {
+            perspective = perspective.opposite
+        }
+        XCTAssertEqual(perspective, .whiteAtBottom)
+        XCTAssertEqual(perspective.opposite, .blackAtBottom)
+    }
+
+    func testLEDFrameComposerKeepsSteadyWhileBlinkPatternsChange() {
+        let hints = [
+            LEDHint(square: .a1, pattern: .steady),
+            LEDHint(square: .b1, pattern: .slowBlink),
+            LEDHint(square: .c1, pattern: .fastBlink),
+        ]
+
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 0).map(\.notation),
+            ["a1", "b1", "c1"]
+        )
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 1).map(\.notation),
+            ["a1", "b1"]
+        )
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 3).map(\.notation),
+            ["a1"]
+        )
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 4).map(\.notation),
+            ["a1", "c1"]
+        )
+        XCTAssertEqual(
+            LEDHintFrameComposer.activeSquares(for: hints, tick: 6).map(\.notation),
+            ["a1", "b1", "c1"]
+        )
+    }
+
+    func testElectronicBoardCapabilitiesRepresentOptionalHardwareFeatures() {
+        let minimal: ElectronicBoardCapabilities = [.positionReading, .realtimePosition]
+        XCTAssertTrue(minimal.contains(.positionReading))
+        XCTAssertTrue(minimal.contains(.realtimePosition))
+        XCTAssertFalse(minimal.contains(.leds))
+        XCTAssertFalse(minimal.contains(.battery))
+        XCTAssertFalse(minimal.contains(.automaticMovement))
+
+        let rich: ElectronicBoardCapabilities = [
+            .positionReading, .realtimePosition, .leds, .ledColors, .battery,
+            .gameStorage, .automaticMovement, .pieceIdentification,
+        ]
+        XCTAssertTrue(rich.contains(.ledColors))
+        XCTAssertTrue(rich.contains(.pieceIdentification))
+    }
+
+    func testElectronicBoardRegistrySelectsMatchingAdapter() throws {
+        let descriptor = TestElectronicChessBoard.makeDescriptor(adapterIdentifier: "test.adapter")
+        let fake = TestElectronicChessBoard(descriptor: descriptor)
+        let registry = ElectronicBoardAdapterRegistry(
+            factories: [TestElectronicBoardFactory(board: fake)]
+        )
+
+        let selected = try registry.makeBoard(for: descriptor)
+        XCTAssertEqual(selected.descriptor, descriptor)
+
+        let unsupported = TestElectronicChessBoard.makeDescriptor(adapterIdentifier: "other.adapter")
+        XCTAssertThrowsError(try registry.makeBoard(for: unsupported))
+    }
+
+#if !SWIFT_PACKAGE
+    func testDefaultRegistryPublishesChessUpPositionSupport() throws {
+        let registry = ElectronicBoardAdapterRegistry.appDefault
+        let chessUp = try XCTUnwrap(
+            registry.supportedBoards.first {
+                $0.adapterIdentifier == ChessUpBoardAdapterFactory.adapterIdentifier
+            }
+        )
+
+        XCTAssertEqual(chessUp.name, "ChessUp")
+        XCTAssertEqual(chessUp.models, "1.ª generación")
+        XCTAssertTrue(chessUp.capabilities.contains(.positionReading))
+        XCTAssertTrue(chessUp.capabilities.contains(.realtimePosition))
+        XCTAssertFalse(chessUp.capabilities.contains(.leds))
+
+        let descriptor = ElectronicBoardDescriptor(
+            adapterIdentifier: ChessUpBoardAdapterFactory.adapterIdentifier,
+            hardwareIdentifier: UUID().uuidString,
+            name: "ChessUp",
+            manufacturer: "Bryght Labs",
+            model: "ChessUp",
+            variantIdentifier: ChessUpBoardAdapterFactory.variantIdentifier,
+            capabilities: chessUp.capabilities
+        )
+        XCTAssertTrue(try registry.makeBoard(for: descriptor) is ChessUpBoardAdapter)
     }
 
     func testChessUpPositionCodecMapsTheInitialPosition() throws {
