@@ -529,44 +529,44 @@ final class OTBGameSessionTests: XCTestCase {
     }
 
     func testReplayBoardUsesFENColorAndAssetMappingForEveryPiece() throws {
-    let fen = Position.standard.fen
-    let blackBackRankAssets = [
-        "black_rook", "black_knight", "black_bishop", "black_queen",
-        "black_king", "black_bishop", "black_knight", "black_rook",
-    ]
-    let whiteBackRankAssets = [
-        "white_rook", "white_knight", "white_bishop", "white_queen",
-        "white_king", "white_bishop", "white_knight", "white_rook",
-    ]
+        let fen = Position.standard.fen
+        let blackBackRankAssets = [
+            "black_rook", "black_knight", "black_bishop", "black_queen",
+            "black_king", "black_bishop", "black_knight", "black_rook",
+        ]
+        let whiteBackRankAssets = [
+            "white_rook", "white_knight", "white_bishop", "white_queen",
+            "white_king", "white_bishop", "white_knight", "white_rook",
+        ]
 
-    for file in 0..<8 {
-        let blackBackRank = try XCTUnwrap(
-            GameReplay.piece(in: fen, rankIndex: 0, fileIndex: file)
-        )
-        let blackPawn = try XCTUnwrap(
-            GameReplay.piece(in: fen, rankIndex: 1, fileIndex: file)
-        )
-        let whitePawn = try XCTUnwrap(
-            GameReplay.piece(in: fen, rankIndex: 6, fileIndex: file)
-        )
-        let whiteBackRank = try XCTUnwrap(
-            GameReplay.piece(in: fen, rankIndex: 7, fileIndex: file)
-        )
+        for file in 0..<8 {
+            let blackBackRank = try XCTUnwrap(
+                GameReplay.piece(in: fen, rankIndex: 0, fileIndex: file)
+            )
+            let blackPawn = try XCTUnwrap(
+                GameReplay.piece(in: fen, rankIndex: 1, fileIndex: file)
+            )
+            let whitePawn = try XCTUnwrap(
+                GameReplay.piece(in: fen, rankIndex: 6, fileIndex: file)
+            )
+            let whiteBackRank = try XCTUnwrap(
+                GameReplay.piece(in: fen, rankIndex: 7, fileIndex: file)
+            )
 
-        XCTAssertEqual(blackBackRank.color, .black)
-        XCTAssertEqual(blackPawn.color, .black)
-        XCTAssertEqual(whitePawn.color, .white)
-        XCTAssertEqual(whiteBackRank.color, .white)
-        XCTAssertEqual(blackBackRank.assetName, blackBackRankAssets[file])
-        XCTAssertEqual(blackPawn.assetName, "black_pawn")
-        XCTAssertEqual(whitePawn.assetName, "white_pawn")
-        XCTAssertEqual(whiteBackRank.assetName, whiteBackRankAssets[file])
+            XCTAssertEqual(blackBackRank.color, .black)
+            XCTAssertEqual(blackPawn.color, .black)
+            XCTAssertEqual(whitePawn.color, .white)
+            XCTAssertEqual(whiteBackRank.color, .white)
+            XCTAssertEqual(blackBackRank.assetName, blackBackRankAssets[file])
+            XCTAssertEqual(blackPawn.assetName, "black_pawn")
+            XCTAssertEqual(whitePawn.assetName, "white_pawn")
+            XCTAssertEqual(whiteBackRank.assetName, whiteBackRankAssets[file])
+        }
+
+        XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))
     }
 
-    XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))
-}
-
-func testChessBoardPerspectiveRotatesTheEntireBoardAndCanBeFlippedRepeatedly() {
+    func testChessBoardPerspectiveRotatesTheEntireBoardAndCanBeFlippedRepeatedly() {
         XCTAssertEqual(
             ChessBoardPerspective.whiteAtBottom.boardPosition(
                 displayRankIndex: 0,
