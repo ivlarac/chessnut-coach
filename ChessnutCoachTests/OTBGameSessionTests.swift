@@ -528,8 +528,16 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(GameReplay.fen(for: record, afterPly: 2), record.moves[1].fenAfter)
     }
 
-    func testReplayBoardUsesFENColorAndForcesTextPresentationForEveryPiece() throws {
+    func testReplayBoardUsesFENColorAndAssetMappingForEveryPiece() throws {
         let fen = Position.standard.fen
+        let blackBackRankAssets = [
+            "black_rook", "black_knight", "black_bishop", "black_queen",
+            "black_king", "black_bishop", "black_knight", "black_rook",
+        ]
+        let whiteBackRankAssets = [
+            "white_rook", "white_knight", "white_bishop", "white_queen",
+            "white_king", "white_bishop", "white_knight", "white_rook",
+        ]
 
         for file in 0..<8 {
             let blackBackRank = try XCTUnwrap(
@@ -549,10 +557,10 @@ final class OTBGameSessionTests: XCTestCase {
             XCTAssertEqual(blackPawn.color, .black)
             XCTAssertEqual(whitePawn.color, .white)
             XCTAssertEqual(whiteBackRank.color, .white)
-            XCTAssertEqual(blackBackRank.textSymbol.unicodeScalars.last?.value, 0xFE0E)
-            XCTAssertEqual(blackPawn.textSymbol.unicodeScalars.last?.value, 0xFE0E)
-            XCTAssertEqual(whitePawn.textSymbol.unicodeScalars.last?.value, 0xFE0E)
-            XCTAssertEqual(whiteBackRank.textSymbol.unicodeScalars.last?.value, 0xFE0E)
+            XCTAssertEqual(blackBackRank.assetName, blackBackRankAssets[file])
+            XCTAssertEqual(blackPawn.assetName, "black_pawn")
+            XCTAssertEqual(whitePawn.assetName, "white_pawn")
+            XCTAssertEqual(whiteBackRank.assetName, whiteBackRankAssets[file])
         }
 
         XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))

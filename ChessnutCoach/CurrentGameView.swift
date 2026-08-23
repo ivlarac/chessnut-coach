@@ -657,14 +657,7 @@ private struct OnScreenChessBoard: View {
                                         rankIndex: position.rankIndex,
                                         fileIndex: position.fileIndex
                                     ) {
-                                        Text(piece.textSymbol)
-                                            .font(.system(size: squareSize * 0.74, design: .serif))
-                                            .foregroundStyle(piece.color == .white ? Color.white : Color.black)
-                                            .shadow(
-                                                color: (piece.color == .white ? Color.black : Color.white).opacity(0.7),
-                                                radius: 1
-                                            )
-                                            .minimumScaleFactor(0.5)
+                                        ChessPieceView(piece: piece, squareSize: squareSize)
                                     }
 
                                     if let hintPattern, hintPattern.isLit(at: tick) {

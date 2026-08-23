@@ -6,13 +6,23 @@ enum ReplayPieceColor: Equatable, Sendable {
     case black
 }
 
+enum ReplayPieceKind: String, Equatable, Sendable {
+    case king
+    case queen
+    case rook
+    case bishop
+    case knight
+    case pawn
+}
+
 struct ReplayPiece: Equatable, Sendable {
-    let symbol: String
+    let kind: ReplayPieceKind
     let color: ReplayPieceColor
 
-    // U+FE0E forces monochrome text presentation. Without it, iOS renders
-    // some chess characters (especially pawns) as multicolour emoji.
-    var textSymbol: String { symbol + "\u{FE0E}" }
+    var assetName: String {
+        let colorPrefix = color == .white ? "white" : "black"
+        return "\(colorPrefix)_\(kind.rawValue)"
+    }
 }
 
 enum ChessBoardPerspective: Equatable, Sendable {
@@ -93,20 +103,18 @@ enum GameReplay {
     }
 
     private static let pieces: [Character: ReplayPiece] = [
-        // Use the filled glyphs for both colours and tint them in SwiftUI.
-        // The outlined Unicode white-piece glyphs have poor contrast on iPhone.
-        "K": ReplayPiece(symbol: "♚", color: .white),
-        "Q": ReplayPiece(symbol: "♛", color: .white),
-        "R": ReplayPiece(symbol: "♜", color: .white),
-        "B": ReplayPiece(symbol: "♝", color: .white),
-        "N": ReplayPiece(symbol: "♞", color: .white),
-        "P": ReplayPiece(symbol: "♟", color: .white),
-        "k": ReplayPiece(symbol: "♚", color: .black),
-        "q": ReplayPiece(symbol: "♛", color: .black),
-        "r": ReplayPiece(symbol: "♜", color: .black),
-        "b": ReplayPiece(symbol: "♝", color: .black),
-        "n": ReplayPiece(symbol: "♞", color: .black),
-        "p": ReplayPiece(symbol: "♟", color: .black),
+        "K": ReplayPiece(kind: .king, color: .white),
+        "Q": ReplayPiece(kind: .queen, color: .white),
+        "R": ReplayPiece(kind: .rook, color: .white),
+        "B": ReplayPiece(kind: .bishop, color: .white),
+        "N": ReplayPiece(kind: .knight, color: .white),
+        "P": ReplayPiece(kind: .pawn, color: .white),
+        "k": ReplayPiece(kind: .king, color: .black),
+        "q": ReplayPiece(kind: .queen, color: .black),
+        "r": ReplayPiece(kind: .rook, color: .black),
+        "b": ReplayPiece(kind: .bishop, color: .black),
+        "n": ReplayPiece(kind: .knight, color: .black),
+        "p": ReplayPiece(kind: .pawn, color: .black),
     ]
 }
 

@@ -22,6 +22,52 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Repair white PNG encoding once
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VENV="$RUNNER_TEMP/pngfix-venv"
+          python3 -m venv "$VENV"
+          "$VENV/bin/pip" install --quiet pillow
+          "$VENV/bin/python" - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageOps
+
+          assets = Path('ChessnutCoach/Assets.xcassets')
+          for kind in ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn']:
+              black_path = assets / f'black_{kind}.imageset' / f'black_{kind}.png'
+              white_path = assets / f'white_{kind}.imageset' / f'white_{kind}.png'
+
+              with Image.open(black_path) as source:
+                  rgba = source.convert('RGBA')
+                  alpha = rgba.getchannel('A')
+                  inverted_rgb = ImageOps.invert(rgba.convert('RGB'))
+                  white = inverted_rgb.convert('RGBA')
+                  white.putalpha(alpha)
+                  white.save(
+                      white_path,
+                      format='PNG',
+                      optimize=True,
+                      compress_level=9,
+                  )
+
+              with Image.open(white_path) as check:
+                  if check.mode != 'RGBA' or check.size != (512, 512):
+                      raise RuntimeError(
+                          f'{white_path}: expected RGBA 512x512, got {check.mode} {check.size}'
+                      )
+                  print(f'{white_path}: {check.mode} {check.size}')
+          PY
+          git checkout origin/main -- .github/workflows/ios-build.yml
+          rm -f .github/workflows/fix-white-piece-png-format.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ChessnutCoach/Assets.xcassets/white_*.imageset/white_*.png .github/workflows/ios-build.yml
+          git add -u .github/workflows/fix-white-piece-png-format.yml || true
+          git commit -m 'Regenerate white chess pieces as RGBA PNG'
+          git push origin HEAD:${{ github.head_ref }}
+
       - name: Apply generic board migration
         if: github.event_name == 'pull_request'
         shell: bash

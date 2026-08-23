@@ -462,14 +462,7 @@ private struct ReplayBoardView: View {
                                     rankIndex: rank,
                                     fileIndex: file
                                 ) {
-                                    Text(piece.textSymbol)
-                                        .font(.system(size: squareSize * 0.72, design: .serif))
-                                        .foregroundStyle(piece.foregroundColor)
-                                        .shadow(
-                                            color: piece.contrastColor.opacity(0.65),
-                                            radius: 1
-                                        )
-                                        .minimumScaleFactor(0.5)
+                                    ChessPieceView(piece: piece, squareSize: squareSize)
                                 }
                             }
                             .frame(width: squareSize, height: squareSize)
@@ -482,15 +475,6 @@ private struct ReplayBoardView: View {
     }
 }
 
-private extension ReplayPiece {
-    var foregroundColor: Color {
-        color == .white ? .white : .black
-    }
-
-    var contrastColor: Color {
-        color == .white ? .black : .white
-    }
-}
 
 private struct PGNFileDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.portableGameNotation] }
