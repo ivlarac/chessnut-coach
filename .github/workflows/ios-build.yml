@@ -22,6 +22,47 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Repair white PNG encoding once
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+
+          assets = Path('ChessnutCoach/Assets.xcassets')
+          for name in [
+              'white_king', 'white_queen', 'white_rook',
+              'white_bishop', 'white_knight', 'white_pawn',
+          ]:
+              path = assets / f'{name}.imageset' / f'{name}.png'
+              with Image.open(path) as image:
+                  image.convert('RGBA').save(
+                      path,
+                      format='PNG',
+                      optimize=True,
+                      compress_level=9,
+                  )
+              with Image.open(path) as check:
+                  if check.mode != 'RGBA':
+                      raise RuntimeError(f'{path}: expected RGBA, got {check.mode}')
+                  print(f'{path}: {check.mode} {check.size}')
+          PY
+          git checkout origin/main -- .github/workflows/ios-build.yml
+          rm -f .github/workflows/fix-white-piece-png-format.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ChessnutCoach/Assets.xcassets/white_*.imageset/white_*.png .github/workflows/ios-build.yml
+          git add -u .github/workflows/fix-white-piece-png-format.yml || true
+          if git diff --cached --quiet; then
+            echo 'White PNGs already use a safe RGBA encoding'
+          else
+            git commit -m 'Re-encode white chess pieces as RGBA PNG'
+            git push origin HEAD:${{ github.head_ref }}
+          fi
+
       - name: Apply generic board migration
         if: github.event_name == 'pull_request'
         shell: bash
