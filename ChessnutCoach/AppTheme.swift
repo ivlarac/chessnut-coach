@@ -63,6 +63,7 @@ struct ChessPieceView: View {
         Image(piece.assetName)
             .resizable()
             .scaledToFit()
+            // The PNG artwork includes transparent margins; this renders at ~88% visual occupancy.
             .frame(width: squareSize * 0.97, height: squareSize * 0.97)
             .accessibilityLabel(piece.assetName.replacingOccurrences(of: "_", with: " "))
     }
