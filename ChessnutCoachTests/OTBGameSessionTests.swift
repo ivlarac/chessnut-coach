@@ -566,7 +566,7 @@ final class OTBGameSessionTests: XCTestCase {
     XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))
 }
 
-    func testChessBoardPerspectiveRotatesTheEntireBoardAndCanBeFlippedRepeatedly() {
+func testChessBoardPerspectiveRotatesTheEntireBoardAndCanBeFlippedRepeatedly() {
         XCTAssertEqual(
             ChessBoardPerspective.whiteAtBottom.boardPosition(
                 displayRankIndex: 0,
