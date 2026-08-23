@@ -1,0 +1,87 @@
+name: Repair PNG Piece Asset Test
+
+on:
+  push:
+    branches:
+      - feature/png-chess-pieces-0.0.18
+
+permissions:
+  contents: write
+
+jobs:
+  repair-test:
+    if: github.event.head_commit.message == 'Repair PNG piece asset test'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/png-chess-pieces-0.0.18
+          fetch-depth: 0
+
+      - name: Restore test file and apply focused asset assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout origin/main -- ChessnutCoachTests/OTBGameSessionTests.swift
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('ChessnutCoachTests/OTBGameSessionTests.swift')
+          text = path.read_text()
+          pattern = r'''    func testReplayBoardUsesFENColorAndForcesTextPresentationForEveryPiece\(\) throws \{.*?        XCTAssertNil\(GameReplay\.piece\(in: fen, rankIndex: 4, fileIndex: 4\)\)\n    \}'''
+          replacement = '''    func testReplayBoardUsesFENColorAndAssetMappingForEveryPiece() throws {
+              let fen = Position.standard.fen
+              let blackBackRankAssets = [
+                  "black_rook", "black_knight", "black_bishop", "black_queen",
+                  "black_king", "black_bishop", "black_knight", "black_rook",
+              ]
+              let whiteBackRankAssets = [
+                  "white_rook", "white_knight", "white_bishop", "white_queen",
+                  "white_king", "white_bishop", "white_knight", "white_rook",
+              ]
+
+              for file in 0..<8 {
+                  let blackBackRank = try XCTUnwrap(
+                      GameReplay.piece(in: fen, rankIndex: 0, fileIndex: file)
+                  )
+                  let blackPawn = try XCTUnwrap(
+                      GameReplay.piece(in: fen, rankIndex: 1, fileIndex: file)
+                  )
+                  let whitePawn = try XCTUnwrap(
+                      GameReplay.piece(in: fen, rankIndex: 6, fileIndex: file)
+                  )
+                  let whiteBackRank = try XCTUnwrap(
+                      GameReplay.piece(in: fen, rankIndex: 7, fileIndex: file)
+                  )
+
+                  XCTAssertEqual(blackBackRank.color, .black)
+                  XCTAssertEqual(blackPawn.color, .black)
+                  XCTAssertEqual(whitePawn.color, .white)
+                  XCTAssertEqual(whiteBackRank.color, .white)
+                  XCTAssertEqual(blackBackRank.assetName, blackBackRankAssets[file])
+                  XCTAssertEqual(blackPawn.assetName, "black_pawn")
+                  XCTAssertEqual(whitePawn.assetName, "white_pawn")
+                  XCTAssertEqual(whiteBackRank.assetName, whiteBackRankAssets[file])
+              }
+
+              XCTAssertNil(GameReplay.piece(in: fen, rankIndex: 4, fileIndex: 4))
+          }'''
+          updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'Expected one replay-piece text test, found {count}')
+          path.write_text(updated)
+          PY
+          git diff --check
+          git rm .github/workflows/repair-png-piece-test.yml
+
+      - name: Commit focused repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ChessnutCoachTests/OTBGameSessionTests.swift
+          git commit -m 'Restore unrelated tests and validate piece assets'
+          git push origin HEAD:feature/png-chess-pieces-0.0.18
