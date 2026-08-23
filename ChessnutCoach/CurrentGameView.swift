@@ -68,6 +68,7 @@ struct CurrentGameView: View {
                 ) { configuration, automaticRotation in
                     automaticBoardRotationEnabled = automaticRotation
                     board.newGame(configuration: configuration)
+                    synchronizeInitialBoardPerspective(for: configuration)
                     synchronizeAutomaticBoardPerspective()
                 }
             }
@@ -578,6 +579,14 @@ struct CurrentGameView: View {
     private func presentFinishDialog(_ action: FinishAction) {
         finishAction = action
         isFinishDialogPresented = true
+    }
+
+    private func synchronizeInitialBoardPerspective(for configuration: NewGameConfiguration) {
+        guard configuration.mode == .solo else { return }
+
+        boardPerspective = configuration.humanSide == .black
+            ? ChessBoardPerspective.whiteAtBottom.opposite
+            : .whiteAtBottom
     }
 
     private func synchronizeAutomaticBoardPerspective() {
