@@ -54,3 +54,17 @@ struct StatusPill: View {
             .clipShape(Capsule())
     }
 }
+
+
+struct ChessPieceView: View {
+    let piece: ReplayPiece
+    let squareSize: CGFloat
+
+    var body: some View {
+        Image(piece.assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: squareSize * 0.97, height: squareSize * 0.97)
+            .accessibilityLabel(piece.assetName.replacingOccurrences(of: "_", with: " "))
+    }
+}
