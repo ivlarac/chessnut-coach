@@ -55,7 +55,6 @@ struct StatusPill: View {
     }
 }
 
-
 struct ChessPieceView: View {
     let piece: ReplayPiece
     let squareSize: CGFloat
