@@ -311,6 +311,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
     var engineStrength: StockfishStrength?
     var engineName: String?
     var allowUndo: Bool
+    var analysisVariations: [AnalysisVariationNode]
 
     init(
         id: UUID = UUID(),
@@ -326,7 +327,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         humanSide: PlayerSide? = nil,
         engineStrength: StockfishStrength? = nil,
         engineName: String? = nil,
-        allowUndo: Bool = false
+        allowUndo: Bool = false,
+        analysisVariations: [AnalysisVariationNode] = []
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -342,6 +344,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         self.engineStrength = engineStrength
         self.engineName = engineName
         self.allowUndo = allowUndo
+        self.analysisVariations = analysisVariations
     }
 
     var moveCount: Int { moves.count }
@@ -370,6 +373,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         case engineStrength
         case engineName
         case allowUndo
+        case analysisVariations
     }
 
     init(from decoder: Decoder) throws {
@@ -388,6 +392,10 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         engineStrength = try container.decodeIfPresent(StockfishStrength.self, forKey: .engineStrength)
         engineName = try container.decodeIfPresent(String.self, forKey: .engineName)
         allowUndo = try container.decodeIfPresent(Bool.self, forKey: .allowUndo) ?? false
+        analysisVariations = try container.decodeIfPresent(
+            [AnalysisVariationNode].self,
+            forKey: .analysisVariations
+        ) ?? []
     }
 }
 

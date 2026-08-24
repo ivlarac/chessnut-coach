@@ -43,6 +43,8 @@ let package = Package(
             ],
             sources: [
                 "GameArchive.swift",
+                "GameAnalysis.swift",
+                "GameAnalysisWorkspace.swift",
                 "GameModels.swift",
                 "OTBGameSession.swift",
                 "ElectronicChessBoard.swift"

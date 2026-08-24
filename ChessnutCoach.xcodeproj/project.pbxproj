@@ -27,8 +27,11 @@
 		A1000000000000000000000F /* CurrentGameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* CurrentGameView.swift */; };
 		A10000000000000000000010 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* DiagnosticsView.swift */; };
 		A10000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* Assets.xcassets */; };
+		A10000000000000000000015 /* GameAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* GameAnalysis.swift */; };
+		A10000000000000000000016 /* GameAnalysisWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* GameAnalysisWorkspace.swift */; };
 		A20000000000000000000001 /* OTBGameSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* OTBGameSessionTests.swift */; };
 		A20000000000000000000002 /* ChessKit in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000003 /* ChessKit */; };
+		A20000000000000000000003 /* GameAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* GameAnalysisTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,7 +65,10 @@
 		B1000000000000000000000F /* CurrentGameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentGameView.swift; sourceTree = "<group>"; };
 		B10000000000000000000010 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		B10000000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000000000000000000015 /* GameAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameAnalysis.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* GameAnalysisWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameAnalysisWorkspace.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 /* OTBGameSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OTBGameSessionTests.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* GameAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameAnalysisTests.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* ChessnutCoachTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChessnutCoachTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -108,6 +114,8 @@
 				B10000000000000000000006 /* GameModels.swift */,
 				B10000000000000000000005 /* OTBGameSession.swift */,
 				B1000000000000000000000B /* GameArchive.swift */,
+				B10000000000000000000015 /* GameAnalysis.swift */,
+				B10000000000000000000016 /* GameAnalysisWorkspace.swift */,
 				B1000000000000000000000C /* GameLibrary.swift */,
 				B1000000000000000000000D /* GameLibraryView.swift */,
 				B10000000000000000000007 /* StockfishEngine.swift */,
@@ -126,6 +134,7 @@
 			isa = PBXGroup;
 			children = (
 				B20000000000000000000001 /* OTBGameSessionTests.swift */,
+				B20000000000000000000003 /* GameAnalysisTests.swift */,
 			);
 			path = ChessnutCoachTests;
 			sourceTree = "<group>";
@@ -303,6 +312,8 @@
 				A10000000000000000000013 /* ChessnutBoardAdapter.swift in Sources */,
 				A10000000000000000000014 /* ChessUpBoardAdapter.swift in Sources */,
 				A1000000000000000000000B /* GameArchive.swift in Sources */,
+				A10000000000000000000015 /* GameAnalysis.swift in Sources */,
+				A10000000000000000000016 /* GameAnalysisWorkspace.swift in Sources */,
 				A1000000000000000000000C /* GameLibrary.swift in Sources */,
 				A1000000000000000000000D /* GameLibraryView.swift in Sources */,
 				A1000000000000000000000E /* AppTheme.swift in Sources */,
@@ -316,6 +327,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A20000000000000000000001 /* OTBGameSessionTests.swift in Sources */,
+				A20000000000000000000003 /* GameAnalysisTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -368,12 +380,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ChessnutCoach/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.0.18;
+				MARKETING_VERSION = 0.0.19;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"$(DERIVED_FILE_DIR)/stockfish18/libStockfish18.a",
@@ -396,12 +408,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ChessnutCoach/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.0.18;
+				MARKETING_VERSION = 0.0.19;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"$(DERIVED_FILE_DIR)/stockfish18/libStockfish18.a",

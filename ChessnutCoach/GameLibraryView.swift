@@ -1,3 +1,4 @@
+import ChessKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -32,7 +33,7 @@ struct GameLibraryView: View {
             } else {
                 ForEach(library.games) { game in
                     NavigationLink {
-                        GameDetailView(game: game)
+                        GameDetailView(game: game, library: library)
                     } label: {
                         GameSummaryRow(
                             game: game,
@@ -123,17 +124,39 @@ private struct GameSummaryRow: View {
 struct GameDetailView: View {
     let game: GameRecord
     @State private var selectedPly: Int
+    @State private var boardPerspective = ChessBoardPerspective.whiteAtBottom
     @State private var isExporting = false
+    @State private var isPlaySetupPresented = false
     @State private var exportError: String?
     @State private var exportDocument: PGNFileDocument
     @State private var shareFileURL: URL?
-    @StateObject private var analysis = ArchivedGameAnalysisController()
+    @State private var branchPendingDeletion: AnalysisVariationNode?
+    @StateObject private var analysis: ArchivedGameAnalysisController
+    @StateObject private var workspace: GameAnalysisWorkspace
 
-    init(game: GameRecord) {
+    @MainActor
+    init(game: GameRecord, library: GameLibrary) {
         self.game = game
-        _selectedPly = State(initialValue: game.status == .finished ? 0 : game.moves.count)
+        let initialPly = game.status == .finished ? 0 : game.moves.count
+        let analysisController = ArchivedGameAnalysisController()
+        _selectedPly = State(initialValue: initialPly)
         _exportDocument = State(initialValue: PGNFileDocument(text: PGNExporter.pgn(for: game)))
         _shareFileURL = State(initialValue: try? PGNShareFile.make(for: game))
+        _analysis = StateObject(wrappedValue: analysisController)
+        _workspace = StateObject(
+            wrappedValue: GameAnalysisWorkspace(
+                game: game,
+                initialPly: initialPly,
+                engine: StockfishEngine.shared,
+                onSave: { library.upsert($0) },
+                onInteractiveSearchStarted: {
+                    analysisController.cancelFullGameAnalysis()
+                },
+                onPositionChanged: { fen, ply in
+                    analysisController.analyze(fen: fen, ply: ply)
+                }
+            )
+        )
     }
 
     var body: some View {
@@ -156,6 +179,19 @@ struct GameDetailView: View {
 
             Section(game.status == .finished ? "Análisis" : "Reproducción") {
                 if game.status == .finished {
+                    HStack {
+                        Label(workspace.mode.displayText, systemImage: modeSymbol)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(modeColor)
+                        Spacer()
+                        Button {
+                            boardPerspective = boardPerspective.opposite
+                        } label: {
+                            Label("Girar", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
                     HStack(alignment: .top, spacing: 8) {
                         EvaluationBarView(
                             evaluation: analysis.evaluation,
@@ -163,7 +199,15 @@ struct GameDetailView: View {
                         )
                         .frame(width: 42)
 
-                        ReplayBoardView(fen: replayFEN)
+                        AnalysisBoardView(
+                            fen: workspace.currentFEN,
+                            perspective: boardPerspective,
+                            selectedSource: workspace.selectedSource,
+                            legalTargets: workspace.legalTargets,
+                            isInteractive: workspace.canMovePieces,
+                            onTap: workspace.handleSquareTap,
+                            onMove: workspace.handleMove
+                        )
                             .aspectRatio(1, contentMode: .fit)
                     }
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
@@ -180,8 +224,67 @@ struct GameDetailView: View {
                     Text(analysis.status)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                    Text(workspace.status)
+                        .font(.footnote)
+                        .foregroundStyle(workspace.mode == .playingStockfish ? Color.orange : Color.secondary)
+
+                    if workspace.isEngineThinking {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Stockfish está realizando su jugada…")
+                                .font(.subheadline.weight(.medium))
+                        }
+                    }
+
+                    if workspace.mode == .playingStockfish {
+                        Button(role: .destructive) {
+                            workspace.stopPlaying()
+                        } label: {
+                            Label("Terminar partida de análisis", systemImage: "stop.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        if workspace.isExploring {
+                            Button {
+                                workspace.leaveVariation()
+                                selectedPly = workspace.currentMainlinePly ?? selectedPly
+                            } label: {
+                                Label("Volver a la partida original", systemImage: "arrow.uturn.backward")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button {
+                                analysis.cancelFullGameAnalysis()
+                                workspace.exploreCurrentPosition()
+                            } label: {
+                                Label("Explorar variante", systemImage: "arrow.triangle.branch")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+
+                        Button {
+                            analysis.cancelFullGameAnalysis()
+                            isPlaySetupPresented = true
+                        } label: {
+                            Label("Jugar contra Stockfish desde aquí", systemImage: "cpu")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 } else {
-                    ReplayBoardView(fen: replayFEN)
+                    AnalysisBoardView(
+                        fen: workspace.currentFEN,
+                        perspective: boardPerspective,
+                        selectedSource: nil,
+                        legalTargets: [],
+                        isInteractive: false,
+                        onTap: { _ in },
+                        onMove: { _, _ in }
+                    )
                         .aspectRatio(1, contentMode: .fit)
                         .listRowInsets(EdgeInsets())
 
@@ -190,38 +293,124 @@ struct GameDetailView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Stepper(value: $selectedPly, in: 0...game.moves.count) {
-                    if let move = GameReplay.move(for: game, atPly: selectedPly) {
-                        Text(savedMoveNotation(for: move))
-                    } else {
-                        Text("Posición inicial")
+                if workspace.mode == .original {
+                    Stepper(value: mainlinePlyBinding, in: 0...game.moves.count) {
+                        if let move = GameReplay.move(for: game, atPly: selectedPly) {
+                            Text(savedMoveNotation(for: move))
+                        } else {
+                            Text("Posición inicial")
+                        }
+                    }
+                } else if case let .variation(nodeID) = workspace.currentReference {
+                    LabeledContent("Línea actual") {
+                        Text(workspace.path(to: nodeID).map(\.san).joined(separator: " "))
+                            .font(.subheadline.monospaced())
+                            .multilineTextAlignment(.trailing)
                     }
                 }
 
                 HStack {
                     Button {
-                        selectedPly = max(0, selectedPly - 1)
+                        if workspace.isExploring {
+                            workspace.moveBackward()
+                            selectedPly = workspace.currentMainlinePly ?? selectedPly
+                        } else {
+                            selectMainline(ply: max(0, selectedPly - 1))
+                        }
                     } label: {
                         Label("Anterior", systemImage: "backward.end")
                     }
-                    .disabled(selectedPly == 0)
+                    .disabled(workspace.currentReference == .mainline(ply: 0))
 
                     Spacer()
 
-                    Text("\(selectedPly)/\(game.moves.count)")
+                    Text(positionCounterText)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
 
                     Spacer()
 
                     Button {
-                        selectedPly = min(game.moves.count, selectedPly + 1)
+                        if workspace.isExploring, let first = currentChildren.first {
+                            workspace.moveForward(through: first.id)
+                        } else {
+                            selectMainline(ply: min(game.moves.count, selectedPly + 1))
+                        }
                     } label: {
                         Label("Siguiente", systemImage: "forward.end")
                     }
-                    .disabled(selectedPly == game.moves.count)
+                    .disabled(
+                        workspace.isExploring
+                            ? currentChildren.isEmpty
+                            : selectedPly == game.moves.count
+                    )
                 }
                 .buttonStyle(.borderless)
+                .disabled(workspace.mode == .playingStockfish)
+
+                if workspace.isExploring, currentChildren.count > 1 {
+                    Text("Continuaciones disponibles")
+                        .font(.caption.weight(.semibold))
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(currentChildren) { child in
+                                Button(child.san) {
+                                    analysis.cancelFullGameAnalysis()
+                                    workspace.moveForward(through: child.id)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if game.status == .finished {
+                Section("Variantes") {
+                    if workspace.variationRows.isEmpty {
+                        Text("Todavía no hay variantes. Sitúate en una posición y pulsa «Explorar variante».")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(workspace.variationRows) { row in
+                            HStack(spacing: 8) {
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(width: CGFloat(row.depth) * 12)
+                                Button {
+                                    analysis.cancelFullGameAnalysis()
+                                    workspace.selectVariation(nodeID: row.node.id)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(row.depth == 0 ? "Desde ply \(row.node.rootPly) · \(row.node.san)" : "↳ \(row.node.san)")
+                                            .font(.subheadline.monospaced().weight(.semibold))
+                                        Text(row.sequenceSAN)
+                                            .font(.caption.monospaced())
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                if workspace.currentReference == .variation(nodeID: row.node.id) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Color.accentColor)
+                                }
+
+                                Button(role: .destructive) {
+                                    branchPendingDeletion = row.node
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Eliminar variante desde \(row.node.san)")
+                            }
+                        }
+                        .disabled(workspace.mode == .playingStockfish)
+                    }
+                }
             }
 
             if game.status == .finished {
@@ -250,6 +439,7 @@ struct GameDetailView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(workspace.isExploring)
                     }
 
                     Text(analysis.fullGameStatus)
@@ -259,7 +449,7 @@ struct GameDetailView: View {
                     if !analysis.fullGameAnalyses.isEmpty {
                         FullGameEvaluationGraph(
                             samples: analysis.fullGameAnalyses,
-                            selectedPly: $selectedPly,
+                            selectedPly: mainlinePlyBinding,
                             totalPly: game.moves.count
                         )
                         .frame(height: 180)
@@ -291,7 +481,7 @@ struct GameDetailView: View {
                         GameMoveRow(
                             row: row,
                             selectedPly: selectedPly,
-                            selectMove: { selectedPly = $0 }
+                            selectMove: { selectMainline(ply: $0) }
                         )
                     }
                 }
@@ -327,13 +517,52 @@ struct GameDetailView: View {
             }
         }
         .navigationTitle("Detalle")
-        .task(id: selectedPly) {
+        .task {
             if game.status == .finished {
-                analysis.analyze(fen: replayFEN, ply: selectedPly)
+                analysis.analyze(
+                    fen: workspace.currentFEN,
+                    ply: workspace.currentMainlinePly
+                )
             }
         }
         .onDisappear {
             analysis.cancel()
+            workspace.cancelAllWork()
+        }
+        .sheet(isPresented: $isPlaySetupPresented) {
+            AnalysisPlaySetupView { configuration in
+                workspace.startPlaying(configuration)
+            }
+        }
+        .confirmationDialog(
+            "Elige pieza para la promoción",
+            isPresented: Binding(
+                get: { workspace.promotionRequest != nil },
+                set: { if !$0 { workspace.cancelPromotion() } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Dama") { workspace.completePromotion(to: .queen) }
+            Button("Torre") { workspace.completePromotion(to: .rook) }
+            Button("Alfil") { workspace.completePromotion(to: .bishop) }
+            Button("Caballo") { workspace.completePromotion(to: .knight) }
+            Button("Cancelar", role: .cancel) { workspace.cancelPromotion() }
+        }
+        .alert(
+            "¿Eliminar esta variante?",
+            isPresented: Binding(
+                get: { branchPendingDeletion != nil },
+                set: { if !$0 { branchPendingDeletion = nil } }
+            ),
+            presenting: branchPendingDeletion
+        ) { node in
+            Button("Eliminar rama", role: .destructive) {
+                workspace.deleteBranch(startingAt: node.id)
+                branchPendingDeletion = nil
+            }
+            Button("Cancelar", role: .cancel) { branchPendingDeletion = nil }
+        } message: { _ in
+            Text("Se eliminará esta continuación y sus subvariantes. La partida original y las demás ramas no cambiarán.")
         }
         .fileExporter(
             isPresented: $isExporting,
@@ -355,8 +584,44 @@ struct GameDetailView: View {
         }
     }
 
-    private var replayFEN: String {
-        GameReplay.fen(for: game, afterPly: selectedPly)
+    private var mainlinePlyBinding: Binding<Int> {
+        Binding(
+            get: { selectedPly },
+            set: { selectMainline(ply: $0) }
+        )
+    }
+
+    private var currentChildren: [AnalysisVariationNode] {
+        workspace.children(of: workspace.currentReference)
+    }
+
+    private var positionCounterText: String {
+        if let ply = workspace.currentMainlinePly {
+            return "\(ply)/\(game.moves.count)"
+        }
+        guard case let .variation(nodeID) = workspace.currentReference else { return "—" }
+        return "Variante · \(workspace.path(to: nodeID).count) jugadas"
+    }
+
+    private var modeSymbol: String {
+        switch workspace.mode {
+        case .original: "book.closed"
+        case .variation: "arrow.triangle.branch"
+        case .playingStockfish: "cpu"
+        }
+    }
+
+    private var modeColor: Color {
+        switch workspace.mode {
+        case .original: .secondary
+        case .variation: .accentColor
+        case .playingStockfish: .orange
+        }
+    }
+
+    private func selectMainline(ply: Int) {
+        selectedPly = min(max(0, ply), game.moves.count)
+        workspace.selectMainline(ply: selectedPly)
     }
 
     private var savedMoveRows: [SavedMoveRow] {
@@ -445,22 +710,50 @@ private struct GameMoveRow: View {
     }
 }
 
-private struct ReplayBoardView: View {
+private struct AnalysisBoardView: View {
     let fen: String
+    let perspective: ChessBoardPerspective
+    let selectedSource: String?
+    let legalTargets: [String]
+    let isInteractive: Bool
+    let onTap: (String) -> Void
+    let onMove: (String, String) -> Void
 
     var body: some View {
         GeometryReader { geometry in
             let squareSize = geometry.size.width / 8
             VStack(spacing: 0) {
-                ForEach(0..<8, id: \.self) { rank in
+                ForEach(0..<8, id: \.self) { displayRank in
                     HStack(spacing: 0) {
-                        ForEach(0..<8, id: \.self) { file in
+                        ForEach(0..<8, id: \.self) { displayFile in
+                            let position = perspective.boardPosition(
+                                displayRankIndex: displayRank,
+                                displayFileIndex: displayFile
+                            )
+                            let notation = squareNotation(
+                                rankIndex: position.rankIndex,
+                                fileIndex: position.fileIndex
+                            )
+                            let isLightSquare = perspective.isLightSquare(
+                                displayRankIndex: displayRank,
+                                displayFileIndex: displayFile
+                            )
+
                             ZStack {
-                                ((rank + file).isMultiple(of: 2) ? Color.boardLight : Color.boardDark)
+                                (isLightSquare ? Color.boardLight : Color.boardDark)
+
+                                if selectedSource == notation {
+                                    Rectangle()
+                                        .fill(Color.accentColor.opacity(0.28))
+                                        .overlay {
+                                            Rectangle().stroke(Color.accentColor, lineWidth: 2)
+                                        }
+                                }
+
                                 if let piece = GameReplay.piece(
                                     in: fen,
-                                    rankIndex: rank,
-                                    fileIndex: file
+                                    rankIndex: position.rankIndex,
+                                    fileIndex: position.fileIndex
                                 ) {
                                     Image(piece.assetName)
                                         .resizable()
@@ -469,14 +762,172 @@ private struct ReplayBoardView: View {
                                         .scaledToFit()
                                         .frame(width: squareSize, height: squareSize)
                                 }
+
+                                if legalTargets.contains(notation) {
+                                    Circle()
+                                        .fill(Color.green.opacity(0.9))
+                                        .frame(width: squareSize * 0.22, height: squareSize * 0.22)
+                                        .shadow(radius: 1)
+                                        .accessibilityHidden(true)
+                                }
+
+                                coordinateLabels(
+                                    notation: notation,
+                                    displayRank: displayRank,
+                                    displayFile: displayFile,
+                                    isLightSquare: isLightSquare
+                                )
                             }
                             .frame(width: squareSize, height: squareSize)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard isInteractive else { return }
+                                onTap(notation)
+                            }
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 10)
+                                    .onEnded { value in
+                                        let fileOffset = Int((value.translation.width / squareSize).rounded())
+                                        let rankOffset = Int((value.translation.height / squareSize).rounded())
+                                        let targetDisplayFile = displayFile + fileOffset
+                                        let targetDisplayRank = displayRank + rankOffset
+                                        guard isInteractive,
+                                              (0..<8).contains(targetDisplayFile),
+                                              (0..<8).contains(targetDisplayRank)
+                                        else { return }
+
+                                        let targetPosition = perspective.boardPosition(
+                                            displayRankIndex: targetDisplayRank,
+                                            displayFileIndex: targetDisplayFile
+                                        )
+                                        onMove(
+                                            notation,
+                                            squareNotation(
+                                                rankIndex: targetPosition.rankIndex,
+                                                fileIndex: targetPosition.fileIndex
+                                            )
+                                        )
+                                    }
+                            )
+                            .accessibilityLabel(
+                                isInteractive ? "Casilla \(notation)" : "Casilla \(notation), solo lectura"
+                            )
                         }
                     }
                 }
             }
         }
-        .accessibilityLabel("Tablero en el medio movimiento \(fen)")
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.primary.opacity(0.18), lineWidth: 1)
+        }
+        .accessibilityLabel(isInteractive ? "Tablero de análisis interactivo" : "Tablero de análisis")
+    }
+
+    @ViewBuilder
+    private func coordinateLabels(
+        notation: String,
+        displayRank: Int,
+        displayFile: Int,
+        isLightSquare: Bool
+    ) -> some View {
+        let labelColor = isLightSquare ? Color.boardDark : Color.boardLight
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                if displayFile == 0, let rank = notation.last { Text(String(rank)) }
+                Spacer(minLength: 0)
+            }
+            Spacer(minLength: 0)
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                if displayRank == 7, let file = notation.first { Text(String(file)) }
+            }
+        }
+        .font(.system(size: 10, weight: .bold, design: .rounded))
+        .foregroundStyle(labelColor.opacity(0.9))
+        .padding(2)
+        .accessibilityHidden(true)
+    }
+
+    private func squareNotation(rankIndex: Int, fileIndex: Int) -> String {
+        let files = Array("abcdefgh")
+        return "\(files[fileIndex])\(8 - rankIndex)"
+    }
+}
+
+private struct AnalysisPlaySetupView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var humanSide = PlayerSide.white
+    @State private var stockfishLevel = 4
+
+    let onStart: (AnalysisPlayConfiguration) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Tu color") {
+                    Picker("Color", selection: $humanSide) {
+                        Text("Blancas").tag(PlayerSide.white)
+                        Text("Negras").tag(PlayerSide.black)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("Se respetará el turno del FEN. Si le corresponde jugar a Stockfish, moverá primero automáticamente.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Nivel de Stockfish") {
+                    Stepper(
+                        value: $stockfishLevel,
+                        in: StockfishStrength.minimumLevel...StockfishStrength.maximumLevel
+                    ) {
+                        LabeledContent("Nivel", value: "\(stockfishLevel)")
+                    }
+
+                    Slider(
+                        value: Binding(
+                            get: { Double(stockfishLevel) },
+                            set: { stockfishLevel = Int($0.rounded()) }
+                        ),
+                        in: Double(StockfishStrength.minimumLevel)...Double(StockfishStrength.maximumLevel),
+                        step: 1
+                    )
+
+                    HStack {
+                        Text("1 · Menor")
+                        Spacer()
+                        Text("20 · Máxima")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    Text(StockfishStrength(level: stockfishLevel).technicalDetailText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Partida de análisis")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Empezar") {
+                        onStart(
+                            AnalysisPlayConfiguration(
+                                humanSide: humanSide,
+                                strength: StockfishStrength(level: stockfishLevel)
+                            )
+                        )
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
     }
 }
 
