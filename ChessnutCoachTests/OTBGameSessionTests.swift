@@ -142,6 +142,171 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(StockfishStrength(level: 7).level, 7)
     }
 
+    func testOpponentConfigurationsKeepEngineSpecificStrengthSeparate() {
+        let stockfish = OpponentEngineConfiguration.stockfish(StockfishStrength(level: 7))
+        let maia = OpponentEngineConfiguration.maia3(
+            Maia3Strength(rating: 825, temperature: 0.9, topP: 0.92, seed: 42)
+        )
+
+        XCTAssertEqual(stockfish.kind, .stockfish18)
+        XCTAssertEqual(stockfish.stockfishStrength?.level, 7)
+        XCTAssertNil(stockfish.maia3Strength)
+        XCTAssertEqual(maia.kind, .maia3)
+        XCTAssertEqual(maia.maia3Strength?.rating, 800)
+        XCTAssertNil(maia.stockfishStrength)
+        XCTAssertEqual(maia.maia3Strength?.seed, 42)
+    }
+
+    func testMaiaRatingClampsAndUsesHundredPointSteps() {
+        XCTAssertEqual(Maia3Strength(rating: 100).rating, 600)
+        XCTAssertEqual(Maia3Strength(rating: 2_999).rating, 2_600)
+        XCTAssertEqual(Maia3Strength(rating: 1_099).rating, 1_000)
+        XCTAssertEqual(Maia3Strength(rating: 800, topP: 0).topP, 0.01)
+        XCTAssertEqual(Maia3Strength(rating: 800, topP: 4).topP, 1)
+    }
+
+    func testMaiaCannotLaunchWhileOfficialLicenseBlockIsUnresolved() {
+        var draft = NewGameDraft(
+            whitePlayerName: "Blancas",
+            blackPlayerName: "Negras",
+            whiteAssistance: .off,
+            blackAssistance: .off
+        )
+        draft.mode = .solo
+        draft.opponentEngineKind = .maia3
+
+        XCTAssertTrue(draft.canStart)
+        XCTAssertFalse(draft.canLaunch)
+        XCTAssertNil(draft.makeLaunch())
+    }
+
+    func testSelectedOpponentConfigurationPersists() throws {
+        let configuration = OpponentEngineConfiguration.maia3(
+            Maia3Strength(rating: 1_000, temperature: 1, topP: 0.95, seed: 7)
+        )
+        let record = GameRecord(
+            initialFEN: Position.standard.fen,
+            whitePlayer: "Jugador",
+            blackPlayer: "Maia 3",
+            mode: .solo,
+            humanSide: .white,
+            opponentEngine: configuration
+        )
+
+        let decoded = try JSONDecoder().decode(
+            GameRecord.self,
+            from: JSONEncoder().encode(record)
+        )
+
+        XCTAssertEqual(decoded.opponentEngine, configuration)
+        XCTAssertNil(decoded.engineStrength)
+        XCTAssertEqual(decoded.engineName, "Maia 3")
+        let pgn = PGNExporter.pgn(for: decoded)
+        XCTAssertTrue(pgn.contains("[Engine \"Maia 3\"]"))
+        XCTAssertTrue(pgn.contains("[EngineKind \"maia3\"]"))
+        XCTAssertTrue(pgn.contains("[EngineStrength \"Nivel humano ≈ 1000\"]"))
+    }
+
+    func testLegacySoloArchiveMigratesToStockfishOpponent() throws {
+        let original = GameRecord(
+            initialFEN: Position.standard.fen,
+            whitePlayer: "Jugador",
+            blackPlayer: "Stockfish 18",
+            mode: .solo,
+            humanSide: .white,
+            engineStrength: StockfishStrength(level: 6),
+            engineName: "Stockfish 18"
+        )
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "opponentEngine")
+
+        let decoded = try JSONDecoder().decode(
+            GameRecord.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(decoded.opponentEngine?.kind, .stockfish18)
+        XCTAssertEqual(decoded.opponentEngine?.stockfishStrength?.level, 6)
+    }
+
+    func testOpponentMoveValidatorAcceptsSpecialLegalMoves() throws {
+        XCTAssertEqual(
+            try OpponentMoveValidator.validatedMove(
+                uci: "e1g1",
+                fen: "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"
+            ).displayText,
+            "e1→g1"
+        )
+        XCTAssertEqual(
+            try OpponentMoveValidator.validatedMove(
+                uci: "e5d6",
+                fen: "8/8/8/3pP3/8/8/8/K6k w - d6 0 1"
+            ).displayText,
+            "e5→d6"
+        )
+        XCTAssertEqual(
+            try OpponentMoveValidator.validatedMove(
+                uci: "a7a8q",
+                fen: "8/P7/8/8/8/8/7k/K7 w - - 0 1"
+            ).promotion,
+            .queen
+        )
+    }
+
+    func testOpponentMoveValidatorRejectsIllegalAndIncompletePromotionMoves() {
+        XCTAssertThrowsError(
+            try OpponentMoveValidator.validatedMove(
+                uci: "e2e5",
+                fen: Position.standard.fen
+            )
+        )
+        XCTAssertThrowsError(
+            try OpponentMoveValidator.validatedMove(
+                uci: "a7a8",
+                fen: "8/P7/8/8/8/8/7k/K7 w - - 0 1"
+            )
+        )
+    }
+
+    func testMaiaPolicySamplingIsDeterministicAndFiltersIllegalMoves() throws {
+        let logits = ["a2a3": 0.0, "b2b3": 0.0, "e2e5": 100.0]
+        let legal: Set<String> = ["a2a3", "b2b3"]
+
+        XCTAssertEqual(
+            try MaiaMoveSampler.sample(
+                logits: logits,
+                legalMoves: legal,
+                temperature: 1,
+                topP: 1,
+                unitInterval: 0.1
+            ),
+            "a2a3"
+        )
+        XCTAssertEqual(
+            try MaiaMoveSampler.sample(
+                logits: logits,
+                legalMoves: legal,
+                temperature: 1,
+                topP: 1,
+                unitInterval: 0.9
+            ),
+            "b2b3"
+        )
+        XCTAssertEqual(
+            try MaiaMoveSampler.sample(
+                logits: logits,
+                legalMoves: legal,
+                temperature: 0,
+                topP: 1,
+                unitInterval: 0.9
+            ),
+            "a2a3"
+        )
+    }
+
     func testNewGameDraftPreservesEditedPlayerNamesInLaunch() throws {
         var draft = NewGameDraft(
             whitePlayerName: "Blancas",
@@ -947,6 +1112,33 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(controller.blackAssistanceMode, .blunders)
     }
 
+    @MainActor
+    func testEndingGameCancelsOpponentAndRejectsLateMove() async throws {
+        let engine = TestDelayedPlayingEngine()
+        let controller = BoardController(
+            library: GameLibrary(inMemory: true),
+            opponentEngineBuilder: { _ in engine }
+        )
+        controller.newGame(
+            configuration: NewGameConfiguration(
+                mode: .solo,
+                humanSide: .white,
+                opponentEngine: .stockfish(StockfishStrength(level: 4)),
+                assistance: AssistanceSettings(white: .off, black: .off)
+            )
+        )
+
+        controller.handleScreenMove(from: "e2", to: "e4")
+        try await waitUntil { controller.moveCount == 1 && controller.isEngineThinking }
+        controller.abortGame()
+        try await Task.sleep(for: .milliseconds(350))
+
+        XCTAssertFalse(controller.hasActiveGame)
+        XCTAssertEqual(controller.moveCount, 0)
+        let wasCancelled = await engine.wasCancelled
+        XCTAssertTrue(wasCancelled)
+    }
+
     func testMonitoredTransportBroadcastsDisconnectWithoutHidingItFromClientStream() async {
         let underlying = TestEasyLinkTransport()
         let monitored = MonitoredEasyLinkTransport(wrapping: underlying)
@@ -1109,6 +1301,30 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertGreaterThan(limited.nodes, 0)
     }
 
+    func testStockfishPlayingAdapterReturnsAValidatedMoveWithoutAnEvaluation() async throws {
+        let engine = StockfishOpponentEngine(
+            engine: StockfishEngine(defaultNodeLimit: 8_000),
+            nodeLimit: 8_000
+        )
+        let configuration = OpponentEngineConfiguration.stockfish(
+            StockfishStrength(level: 4)
+        )
+        let response = try await engine.move(
+            for: ChessPlayingRequest(
+                fen: Position.standard.fen,
+                moveHistory: [],
+                configuration: configuration
+            )
+        )
+
+        XCTAssertNoThrow(
+            try OpponentMoveValidator.validatedMove(
+                uci: response.uci,
+                fen: Position.standard.fen
+            )
+        )
+    }
+
     func testStockfishCoachEvaluatesEveryDestinationOfLiftedE2Pawn() async throws {
         let engine = StockfishEngine(defaultNodeLimit: 8_000)
         let coach = StockfishMoveCoach(
@@ -1163,6 +1379,21 @@ final class OTBGameSessionTests: XCTestCase {
 }
 
 #if !SWIFT_PACKAGE
+private actor TestDelayedPlayingEngine: ChessPlayingEngine {
+    nonisolated let kind = OpponentEngineKind.stockfish18
+    private(set) var wasCancelled = false
+
+    func move(for request: ChessPlayingRequest) async throws -> ChessPlayingMove {
+        _ = request
+        try await Task.sleep(for: .milliseconds(250))
+        return ChessPlayingMove(uci: "e7e5")
+    }
+
+    func cancel() async {
+        wasCancelled = true
+    }
+}
+
 private final class TestEasyLinkTransport: EasyLinkTransport, @unchecked Sendable {
     let notifications: AsyncStream<EasyLinkNotification>
     private let continuation: AsyncStream<EasyLinkNotification>.Continuation

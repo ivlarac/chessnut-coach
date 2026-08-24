@@ -207,7 +207,7 @@ struct CurrentGameView: View {
             } else if board.hasActiveGame {
                 Label(
                     board.isEngineTurn
-                        ? "Stockfish moverá automáticamente sus piezas cuando termine de calcular."
+                        ? "\(board.opponentDisplayName) moverá automáticamente sus piezas cuando termine de calcular."
                         : "Toca una pieza y después su destino, o arrástrala directamente.",
                     systemImage: board.isEngineTurn ? "cpu" : "hand.tap"
                 )
@@ -294,7 +294,7 @@ struct CurrentGameView: View {
                         color: .coachAccent
                     )
                     Spacer()
-                    Text(board.engineStrength?.displayText ?? "Stockfish")
+                    Text(board.opponentEngineConfiguration?.strengthDisplayText ?? board.opponentDisplayName)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -358,21 +358,21 @@ struct CurrentGameView: View {
         if board.isEngineThinking {
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("Stockfish está pensando…")
+                    Text("\(board.opponentDisplayName) está pensando…")
                         .font(.subheadline.weight(.medium))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if let suggestion = board.engineSuggestion {
                 Label(
                     board.isConnected
-                        ? "Jugada de Stockfish: \(suggestion.displayText)"
-                        : "Stockfish: \(suggestion.displayText)",
+                        ? "Jugada de \(board.opponentDisplayName): \(suggestion.displayText)"
+                        : "\(board.opponentDisplayName): \(suggestion.displayText)",
                     systemImage: "cpu"
                 )
                 .font(.headline)
                 .foregroundStyle(Color.coachAccent)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel("Jugada de Stockfish, de \(suggestion.move.from.notation) a \(suggestion.move.to.notation)")
+                .accessibilityLabel("Jugada de \(board.opponentDisplayName), de \(suggestion.move.from.notation) a \(suggestion.move.to.notation)")
         }
 
         if board.isUndoAllowed && !board.isGameFinished && board.moveCount > 0 {
@@ -588,7 +588,7 @@ struct CurrentGameView: View {
     private var screenBoardModeText: String {
         if board.isConnected { return "Referencia visual · Solo lectura" }
         if !board.hasActiveGame { return "Preparado · Sin partida" }
-        if board.isEngineTurn { return "Esperando a Stockfish" }
+        if board.isEngineTurn { return "Esperando a \(board.opponentDisplayName)" }
         return "Tablero interactivo"
     }
 
@@ -841,8 +841,8 @@ private struct NewGameSetupView: View {
                     if draft.mode == .solo {
                         Label(
                             isPhysicalBoardConnected
-                                ? "Jugarás en el tablero físico; la pantalla mostrará la posición y la respuesta de Stockfish."
-                                : "Jugarás directamente en el tablero de la pantalla y Stockfish moverá sus piezas automáticamente.",
+                                ? "Jugarás en el tablero físico; la pantalla mostrará la posición y la respuesta del motor rival."
+                                : "Jugarás directamente en el tablero de la pantalla y el motor rival moverá sus piezas automáticamente.",
                             systemImage: "cpu"
                         )
                         .font(.footnote)
@@ -856,6 +856,35 @@ private struct NewGameSetupView: View {
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    }
+                }
+
+                if draft.mode == .solo {
+                    Section("Motor rival") {
+                        Picker("Motor", selection: $draft.opponentEngineKind) {
+                            ForEach(OpponentEngineKind.allCases) { engine in
+                                HStack {
+                                    Text(engine.displayName)
+                                    if !engine.isPlayableInThisBuild {
+                                        Image(systemName: "lock.fill")
+                                    }
+                                }
+                                .tag(engine)
+                            }
+                        }
+
+                        Text(draft.opponentEngineKind.styleDescription)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        if draft.opponentEngineKind == .maia3 {
+                            Label(
+                                "No disponible en esta compilación. El código y los pesos oficiales son AGPL-3.0; incorporarlos requiere resolver expresamente la licencia y la distribución de la app.",
+                                systemImage: "lock.trianglebadge.exclamationmark"
+                            )
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                        }
                     }
                 }
 
@@ -901,7 +930,7 @@ private struct NewGameSetupView: View {
                     }
                 }
 
-                if draft.mode == .solo {
+                if draft.mode == .solo && draft.opponentEngineKind == .stockfish18 {
                     Section("Nivel de Stockfish") {
                         Stepper(
                             value: $draft.stockfishLevel,
@@ -932,6 +961,23 @@ private struct NewGameSetupView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                } else if draft.mode == .solo && draft.opponentEngineKind == .maia3 {
+                    Section("Nivel humano aproximado") {
+                        Stepper(
+                            value: $draft.maia3Rating,
+                            in: Maia3Strength.minimumRating...Maia3Strength.maximumRating,
+                            step: Maia3Strength.ratingStep
+                        ) {
+                            LabeledContent("Rating del modelo", value: "≈ \(draft.maia3Rating)")
+                        }
+
+                        Text("Rango previsto: 600–2600 en pasos de 100. No equivale exactamente a rating FIDE, Chess.com o Lichess.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if draft.mode == .solo {
                     Section("Ayuda para ti") {
                         setupAssistancePicker(
                             title: "Tu ayuda",
@@ -977,6 +1023,9 @@ private struct NewGameSetupView: View {
                 Section("Resumen") {
                     LabeledContent("Partida", value: draft.mode.displayText)
                     LabeledContent("Jugadores", value: playersSummary)
+                    if draft.mode == .solo {
+                        LabeledContent("Motor", value: draft.opponentEngineConfiguration.displayName)
+                    }
                     LabeledContent(
                         "Tablero",
                         value: isPhysicalBoardConnected ? "Físico conectado" : "En pantalla"
@@ -992,7 +1041,7 @@ private struct NewGameSetupView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(!draft.canStart)
+                    .disabled(!draft.canLaunch)
                     .accessibilityHint("Inicia la partida con la configuración mostrada")
                 }
             }
@@ -1007,13 +1056,14 @@ private struct NewGameSetupView: View {
     }
 
     private var soloTurnExplanation: String {
+        let opponent = draft.opponentEngineConfiguration.displayName
         switch draft.sideChoice {
         case .white:
-            "Después de cada jugada tuya, Stockfish responderá; en pantalla la respuesta se ejecutará automáticamente."
+            "Después de cada jugada tuya, \(opponent) responderá; en pantalla la respuesta se ejecutará automáticamente."
         case .black:
-            "Stockfish moverá primero; en pantalla su primera jugada se ejecutará automáticamente."
+            "\(opponent) moverá primero; en pantalla su primera jugada se ejecutará automáticamente."
         case .random:
-            "Si te corresponden negras, Stockfish moverá primero. En modo pantalla sus jugadas se ejecutan automáticamente."
+            "Si te corresponden negras, \(opponent) moverá primero. En modo pantalla sus jugadas se ejecutan automáticamente."
         }
     }
 
@@ -1022,7 +1072,7 @@ private struct NewGameSetupView: View {
         case .twoPlayer:
             "\(draft.whitePlayerName.trimmingCharacters(in: .whitespacesAndNewlines)) – \(draft.blackPlayerName.trimmingCharacters(in: .whitespacesAndNewlines))"
         case .solo:
-            "\(draft.humanPlayerName.trimmingCharacters(in: .whitespacesAndNewlines)) – Stockfish"
+            "\(draft.humanPlayerName.trimmingCharacters(in: .whitespacesAndNewlines)) – \(draft.opponentEngineConfiguration.displayName)"
         }
     }
 

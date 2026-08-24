@@ -46,6 +46,7 @@ let package = Package(
                 "GameAnalysis.swift",
                 "GameAnalysisWorkspace.swift",
                 "GameModels.swift",
+                "OpponentEngine.swift",
                 "OTBGameSession.swift",
                 "ElectronicChessBoard.swift"
             ]

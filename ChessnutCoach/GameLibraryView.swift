@@ -173,7 +173,10 @@ struct GameDetailView: View {
                 LabeledContent("Modo", value: game.mode.displayText)
                 if game.mode == .solo {
                     LabeledContent("Tu color", value: game.humanSide?.displayText ?? "—")
-                    LabeledContent("Nivel", value: game.engineStrength?.displayText ?? "Máxima")
+                    let opponent = game.opponentEngine
+                        ?? .stockfish(game.engineStrength ?? .full)
+                    LabeledContent("Motor rival", value: opponent.displayName)
+                    LabeledContent("Nivel", value: opponent.strengthDisplayText)
                 }
             }
 

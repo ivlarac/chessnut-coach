@@ -60,7 +60,7 @@ Las fases 7 y 8 se entregan juntas en una única PR:
 
 La fase 9 añade:
 
-- partidas físicas contra una persona o contra Stockfish, eligiendo blancas, negras o color aleatorio;
+- partidas físicas contra una persona o contra un motor rival, eligiendo blancas, negras o color aleatorio;
 - fuerza de Stockfish configurable mediante una escala sencilla de nivel 1 a 20;
 - sugerencia del motor visible en pantalla, con origen fijo y destino intermitente en los LEDs;
 - confirmación física obligatoria de la jugada exacta antes de avanzar el turno;
@@ -228,11 +228,13 @@ Antes del merge de esta PR:
 10. finaliza una partida, ábrela desde **Partidas** y confirma que el análisis Stockfish y la barra lateral cambian al recorrer sus movimientos;
 11. cierra y vuelve a abrir la app para confirmar la recuperación de la partida y de la biblioteca.
 
-## Fase 9: juego en solitario
+## Juego en solitario y motores rivales
 
-El botón **Nueva partida** está siempre visible y permite elegir entre **Contra persona** y **Contra Stockfish**, incluso antes de conectar el tablero. Contra una persona se mantienen ayudas independientes para blancas y negras. Contra Stockfish se elige la ayuda del jugador, su color —blancas, negras o aleatorio— y el nivel del motor de 1 a 20.
+El botón **Nueva partida** está siempre visible y permite elegir entre **Contra persona** y **Contra IA**, incluso antes de conectar el tablero. El motor rival está desacoplado de la evaluación objetiva: actualmente Stockfish 18 es el rival jugable, mientras Stockfish continúa siendo siempre el responsable de las ayudas, centipeones, blunders y análisis.
 
 Los niveles 1 a 19 recorren el rango real `UCI_Elo` de 1320 a 3190. El nivel 20 utiliza Stockfish sin limitación. El diseño, persistencia, estados y criterios de aceptación están en [`PHASE_9_SOLO_MODE.md`](PHASE_9_SOLO_MODE.md).
+
+Maia 3 aparece como opción bloqueada, no como una implementación simulada. La conversión oficial Maia3-5M a Core ML para iOS 16 es técnicamente viable (~11 MB FP16), pero el código y los pesos oficiales están bajo AGPL-3.0 y no se redistribuyen sin una decisión explícita sobre la licencia de la aplicación y el canal iOS. La investigación reproducible, revisiones exactas y pasos para habilitarlo están en [`MAIA3_INTEGRATION.md`](MAIA3_INTEGRATION.md).
 
 ## Validación física de la fase 9
 

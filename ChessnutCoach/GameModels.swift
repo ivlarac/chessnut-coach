@@ -60,7 +60,7 @@ enum GameMode: String, Codable, CaseIterable, Identifiable, Sendable {
     var displayText: String {
         switch self {
         case .twoPlayer: "Contra persona"
-        case .solo: "Contra Stockfish"
+        case .solo: "Contra IA"
         }
     }
 }
@@ -155,11 +155,35 @@ struct StockfishStrength: Equatable, Codable, Sendable {
 struct NewGameConfiguration: Equatable, Sendable {
     var mode: GameMode = .twoPlayer
     var humanSide: PlayerSide = .white
-    var strength: StockfishStrength = StockfishStrength(level: 4)
+    var opponentEngine: OpponentEngineConfiguration = .stockfish(StockfishStrength(level: 4))
     var assistance: AssistanceSettings = AssistanceSettings()
     var allowUndo: Bool = false
     var whitePlayerName: String?
     var blackPlayerName: String?
+
+    /// Source-compatible access for callers from the former Stockfish-only flow.
+    var strength: StockfishStrength {
+        opponentEngine.stockfishStrength ?? StockfishStrength(level: 4)
+    }
+
+    init(
+        mode: GameMode = .twoPlayer,
+        humanSide: PlayerSide = .white,
+        strength: StockfishStrength = StockfishStrength(level: 4),
+        opponentEngine: OpponentEngineConfiguration? = nil,
+        assistance: AssistanceSettings = AssistanceSettings(),
+        allowUndo: Bool = false,
+        whitePlayerName: String? = nil,
+        blackPlayerName: String? = nil
+    ) {
+        self.mode = mode
+        self.humanSide = humanSide
+        self.opponentEngine = opponentEngine ?? .stockfish(strength)
+        self.assistance = assistance
+        self.allowUndo = allowUndo
+        self.whitePlayerName = whitePlayerName
+        self.blackPlayerName = blackPlayerName
+    }
 }
 
 struct NewGameLaunch: Equatable, Sendable {
@@ -173,7 +197,9 @@ struct NewGameLaunch: Equatable, Sendable {
 struct NewGameDraft: Equatable, Sendable {
     var mode = GameMode.twoPlayer
     var sideChoice = HumanSideChoice.white
+    var opponentEngineKind = OpponentEngineKind.stockfish18
     var stockfishLevel = 4
+    var maia3Rating = 800
     var humanPlayerName: String
     var whitePlayerName: String
     var blackPlayerName: String
@@ -212,8 +238,12 @@ struct NewGameDraft: Equatable, Sendable {
         }
     }
 
+    var canLaunch: Bool {
+        canStart && (mode != .solo || opponentEngineKind.isPlayableInThisBuild)
+    }
+
     func makeLaunch(randomValue: Bool = Bool.random()) -> NewGameLaunch? {
-        guard canStart else { return nil }
+        guard canLaunch else { return nil }
 
         let humanSide = sideChoice.resolvedSide(randomValue: randomValue)
         let assistance = mode == .solo
@@ -226,18 +256,20 @@ struct NewGameDraft: Equatable, Sendable {
                 black: blackAssistance
             )
         let humanName = Self.trimmed(humanPlayerName)
+        let opponent = opponentEngineConfiguration
+        let opponentName = opponent.displayName
         let whiteName = mode == .solo
-            ? (humanSide == .white ? humanName : "Stockfish 18")
+            ? (humanSide == .white ? humanName : opponentName)
             : Self.trimmed(whitePlayerName)
         let blackName = mode == .solo
-            ? (humanSide == .black ? humanName : "Stockfish 18")
+            ? (humanSide == .black ? humanName : opponentName)
             : Self.trimmed(blackPlayerName)
 
         return NewGameLaunch(
             configuration: NewGameConfiguration(
                 mode: mode,
                 humanSide: humanSide,
-                strength: StockfishStrength(level: stockfishLevel),
+                opponentEngine: opponent,
                 assistance: assistance,
                 allowUndo: mode == .twoPlayer && allowUndo,
                 whitePlayerName: whiteName,
@@ -245,6 +277,15 @@ struct NewGameDraft: Equatable, Sendable {
             ),
             automaticBoardRotation: mode == .twoPlayer && automaticBoardRotation
         )
+    }
+
+    var opponentEngineConfiguration: OpponentEngineConfiguration {
+        switch opponentEngineKind {
+        case .stockfish18:
+            .stockfish(StockfishStrength(level: stockfishLevel))
+        case .maia3:
+            .maia3(Maia3Strength(rating: maia3Rating))
+        }
     }
 
     private static func preferredHumanName(white: String, black: String) -> String {
@@ -267,7 +308,10 @@ struct NewGameDraft: Equatable, Sendable {
 
     private static func isValidHumanName(_ value: String) -> Bool {
         let value = trimmed(value)
-        return !value.isEmpty && !value.localizedCaseInsensitiveContains("stockfish")
+        return !value.isEmpty && !OpponentEngineKind.allCases.contains {
+            value.localizedCaseInsensitiveContains($0.displayName)
+                || value.localizedCaseInsensitiveContains($0.rawValue)
+        }
     }
 
     private static func trimmed(_ value: String) -> String {
@@ -423,6 +467,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
     var result: GameResult
     var mode: GameMode
     var humanSide: PlayerSide?
+    var opponentEngine: OpponentEngineConfiguration?
+    /// Legacy compatibility fields retained while old archives migrate.
     var engineStrength: StockfishStrength?
     var engineName: String?
     var allowUndo: Bool
@@ -440,6 +486,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         result: GameResult = .unfinished,
         mode: GameMode = .twoPlayer,
         humanSide: PlayerSide? = nil,
+        opponentEngine: OpponentEngineConfiguration? = nil,
         engineStrength: StockfishStrength? = nil,
         engineName: String? = nil,
         allowUndo: Bool = false,
@@ -456,8 +503,14 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         self.result = result
         self.mode = mode
         self.humanSide = humanSide
-        self.engineStrength = engineStrength
-        self.engineName = engineName
+        let migratedOpponent = opponentEngine ?? Self.legacyOpponent(
+            mode: mode,
+            engineStrength: engineStrength,
+            engineName: engineName
+        )
+        self.opponentEngine = migratedOpponent
+        self.engineStrength = engineStrength ?? migratedOpponent?.stockfishStrength
+        self.engineName = engineName ?? migratedOpponent?.displayName
         self.allowUndo = allowUndo
         self.analysisVariations = analysisVariations
     }
@@ -485,6 +538,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         case result
         case mode
         case humanSide
+        case opponentEngine
         case engineStrength
         case engineName
         case allowUndo
@@ -504,13 +558,35 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         result = try container.decode(GameResult.self, forKey: .result)
         mode = try container.decodeIfPresent(GameMode.self, forKey: .mode) ?? .twoPlayer
         humanSide = try container.decodeIfPresent(PlayerSide.self, forKey: .humanSide)
-        engineStrength = try container.decodeIfPresent(StockfishStrength.self, forKey: .engineStrength)
-        engineName = try container.decodeIfPresent(String.self, forKey: .engineName)
+        let legacyStrength = try container.decodeIfPresent(StockfishStrength.self, forKey: .engineStrength)
+        let legacyName = try container.decodeIfPresent(String.self, forKey: .engineName)
+        opponentEngine = try container.decodeIfPresent(
+            OpponentEngineConfiguration.self,
+            forKey: .opponentEngine
+        ) ?? Self.legacyOpponent(
+            mode: mode,
+            engineStrength: legacyStrength,
+            engineName: legacyName
+        )
+        engineStrength = legacyStrength ?? opponentEngine?.stockfishStrength
+        engineName = legacyName ?? opponentEngine?.displayName
         allowUndo = try container.decodeIfPresent(Bool.self, forKey: .allowUndo) ?? false
         analysisVariations = try container.decodeIfPresent(
             [AnalysisVariationNode].self,
             forKey: .analysisVariations
         ) ?? []
+    }
+
+    private static func legacyOpponent(
+        mode: GameMode,
+        engineStrength: StockfishStrength?,
+        engineName: String?
+    ) -> OpponentEngineConfiguration? {
+        guard mode == .solo else { return nil }
+
+        // Every archive written before the generic field existed used
+        // Stockfish, even if `engineName` was absent or localized differently.
+        return .stockfish(engineStrength ?? .full)
     }
 }
 

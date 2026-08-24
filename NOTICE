@@ -12,3 +12,8 @@ Third-party components are not relicensed by this NOTICE. They retain their
 respective copyright notices and license terms. In particular, the Stockfish
 source used by this project is included as the Vendor/Stockfish submodule and
 remains subject to the license provided by the Stockfish project.
+
+Maia 3 is not included in this distribution. Its official source and model
+weights were evaluated for a future optional opponent and are published by the
+University of Toronto CSSLab under GNU AGPL-3.0; see MAIA3_INTEGRATION.md. No
+Maia source code, converted model or model weights are bundled here.
