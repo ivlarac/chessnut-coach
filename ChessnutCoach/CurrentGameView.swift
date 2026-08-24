@@ -1057,7 +1057,7 @@ private struct NewGameSetupView: View {
 
     private var soloTurnExplanation: String {
         let opponent = draft.opponentEngineConfiguration.displayName
-        switch draft.sideChoice {
+        return switch draft.sideChoice {
         case .white:
             "Después de cada jugada tuya, \(opponent) responderá; en pantalla la respuesta se ejecutará automáticamente."
         case .black:
