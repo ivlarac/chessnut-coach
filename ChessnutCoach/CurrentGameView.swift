@@ -18,25 +18,18 @@ struct CurrentGameView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 16) {
+                    gameCard
                     connectionCard
                     screenBoardCard
-                    gameCard
-                    assistanceCard
-                    historyCard
+                    if board.hasActiveGame {
+                        assistanceCard
+                        historyCard
+                    }
                 }
                 .padding()
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Chessnut Coach")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        isNewGamePresented = true
-                    } label: {
-                        Label("Nueva partida", systemImage: "plus.circle.fill")
-                    }
-                }
-            }
             .confirmationDialog(
                 finishDialogTitle,
                 isPresented: $isFinishDialogPresented,
@@ -63,12 +56,15 @@ struct CurrentGameView: View {
             }
             .sheet(isPresented: $isNewGamePresented) {
                 NewGameSetupView(
+                    whitePlayerName: board.whitePlayerName,
+                    blackPlayerName: board.blackPlayerName,
                     whiteAssistance: board.whiteAssistanceMode,
-                    blackAssistance: board.blackAssistanceMode
-                ) { configuration, automaticRotation in
-                    automaticBoardRotationEnabled = automaticRotation
-                    board.newGame(configuration: configuration)
-                    synchronizeInitialBoardPerspective(for: configuration)
+                    blackAssistance: board.blackAssistanceMode,
+                    isPhysicalBoardConnected: board.isConnected
+                ) { launch in
+                    automaticBoardRotationEnabled = launch.automaticBoardRotation
+                    board.newGame(configuration: launch.configuration)
+                    synchronizeInitialBoardPerspective(for: launch.configuration)
                     synchronizeAutomaticBoardPerspective()
                 }
             }
@@ -79,7 +75,7 @@ struct CurrentGameView: View {
     }
 
     private var connectionCard: some View {
-        CoachCard(board.boardDisplayName, systemImage: "dot.radiowaves.left.and.right") {
+        CoachCard("Tablero físico", systemImage: "dot.radiowaves.left.and.right") {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     StatusPill(
@@ -87,6 +83,8 @@ struct CurrentGameView: View {
                         systemImage: board.isConnected ? "checkmark.circle.fill" : "circle",
                         color: board.isConnected ? .green : .secondary
                     )
+                    Text(board.boardDisplayName)
+                        .font(.headline)
                     Text(board.status)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -168,7 +166,7 @@ struct CurrentGameView: View {
                     )
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .disabled(board.isScanningForBoards)
             }
         }
@@ -178,8 +176,8 @@ struct CurrentGameView: View {
         CoachCard("Tablero en pantalla", systemImage: "checkerboard.rectangle") {
             HStack(spacing: 12) {
                 Label(
-                    board.isConnected ? "Referencia visual · Solo lectura" : "Tablero interactivo",
-                    systemImage: board.isConnected ? "eye" : "hand.tap"
+                    screenBoardModeText,
+                    systemImage: isScreenBoardInteractive ? "hand.tap" : "eye"
                 )
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -198,7 +196,7 @@ struct CurrentGameView: View {
             OnScreenChessBoard(
                 board: board,
                 perspective: boardPerspective,
-                isInteractive: !board.isConnected
+                isInteractive: isScreenBoardInteractive
             )
                 .aspectRatio(1, contentMode: .fit)
 
@@ -216,7 +214,7 @@ struct CurrentGameView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             } else {
-                Text("Inicia una partida para jugar directamente aquí.")
+                Text("El tablero estará listo para jugar cuando configures una nueva partida.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -233,30 +231,62 @@ struct CurrentGameView: View {
     }
 
     private var gameCard: some View {
-        CoachCard("Partida actual", systemImage: "checkerboard.rectangle") {
-            VStack(spacing: 12) {
-                playerField(
-                    title: "Blancas",
-                    symbolColor: .white,
-                    selection: whitePlayerBinding
-                )
-                .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .black)
-                Divider()
-                playerField(
-                    title: "Negras",
-                    symbolColor: .black,
-                    selection: blackPlayerBinding
-                )
-                .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .white)
+        CoachCard(board.hasActiveGame ? "Partida en curso" : "Partida", systemImage: "flag.checkered") {
+            if !board.hasActiveGame {
+                emptyGameState
+            } else {
+                activeGameContent
+            }
+        }
+    }
+
+    private var emptyGameState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "checkerboard.rectangle")
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(Color.coachAccent)
+                .accessibilityHidden(true)
+
+            VStack(spacing: 5) {
+                Text("No hay ninguna partida en curso")
+                    .font(.headline)
+                Text("Configura jugadores, rival y ayudas antes de comenzar.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
 
-            if !board.hasActiveGame {
-                StatusPill(
-                    text: "Sin partida iniciada",
-                    systemImage: "pause.circle.fill",
-                    color: .secondary
-                )
-            } else if board.isSoloGame {
+            Button {
+                isNewGamePresented = true
+            } label: {
+                Label("Nueva partida", systemImage: "plus.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .accessibilityHint("Abre la configuración de jugadores y tipo de partida")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var activeGameContent: some View {
+        VStack(spacing: 12) {
+            playerSummary(
+                title: "Blancas",
+                name: board.whitePlayerName,
+                symbolColor: .white
+            )
+            Divider()
+            playerSummary(
+                title: "Negras",
+                name: board.blackPlayerName,
+                symbolColor: .black
+            )
+        }
+
+        if board.isSoloGame {
                 HStack {
                     StatusPill(
                         text: "Solitario · \(board.humanSide?.displayText ?? "—")",
@@ -268,9 +298,15 @@ struct CurrentGameView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-            }
+        } else {
+            StatusPill(
+                text: "Contra persona",
+                systemImage: "person.2.fill",
+                color: .coachAccent
+            )
+        }
 
-            HStack(spacing: 8) {
+        HStack(spacing: 8) {
                 metric(
                     title: "Turno",
                     value: board.hasActiveGame ? board.sideToMoveLabel : "—"
@@ -285,14 +321,14 @@ struct CurrentGameView: View {
                     title: "Resultado",
                     value: board.hasActiveGame ? board.gameResultLabel : "No iniciada"
                 )
-            }
+        }
 
-            Text(board.gameStatus)
+        Text(board.gameStatus)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if board.hasActiveGame, let liftedSquare = board.liftedSquare {
+        if let liftedSquare = board.liftedSquare {
                 Label(
                     board.isConnected
                         ? "Pieza levantada: \(liftedSquare)"
@@ -302,13 +338,13 @@ struct CurrentGameView: View {
                 .font(.subheadline.weight(.medium))
             }
 
-            if board.hasActiveGame && !board.legalTargets.isEmpty {
+        if !board.legalTargets.isEmpty {
                 Text("Destinos: \(board.legalTargets.joined(separator: ", "))")
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
             }
 
-            if board.hasActiveGame && board.isPromotionPending {
+        if board.isPromotionPending {
                 Label(
                     board.isConnected
                         ? "Sustituye físicamente el peón por la pieza elegida para completar la promoción."
@@ -319,14 +355,14 @@ struct CurrentGameView: View {
                 .foregroundStyle(.orange)
             }
 
-            if board.hasActiveGame && board.isEngineThinking {
+        if board.isEngineThinking {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Stockfish está pensando…")
                         .font(.subheadline.weight(.medium))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            } else if board.hasActiveGame, let suggestion = board.engineSuggestion {
+        } else if let suggestion = board.engineSuggestion {
                 Label(
                     board.isConnected
                         ? "Jugada de Stockfish: \(suggestion.displayText)"
@@ -337,17 +373,9 @@ struct CurrentGameView: View {
                 .foregroundStyle(Color.coachAccent)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel("Jugada de Stockfish, de \(suggestion.move.from.notation) a \(suggestion.move.to.notation)")
-            }
+        }
 
-            Button {
-                isNewGamePresented = true
-            } label: {
-                Label("Nueva partida · Persona o Stockfish", systemImage: "plus.circle.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-
-            if board.hasActiveGame && board.isUndoAllowed && !board.isGameFinished && board.moveCount > 0 {
+        if board.isUndoAllowed && !board.isGameFinished && board.moveCount > 0 {
                 Button {
                     board.undoLastMove()
                 } label: {
@@ -364,9 +392,9 @@ struct CurrentGameView: View {
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            }
+        }
 
-            if board.hasActiveGame && !board.isGameFinished {
+        if !board.isGameFinished {
                 Menu {
                     Button("Tablas por acuerdo") {
                         presentFinishDialog(.draw)
@@ -382,7 +410,6 @@ struct CurrentGameView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-            }
         }
     }
 
@@ -453,10 +480,10 @@ struct CurrentGameView: View {
         }
     }
 
-    private func playerField(
+    private func playerSummary(
         title: String,
-        symbolColor: Color,
-        selection: Binding<String>
+        name: String,
+        symbolColor: Color
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "circle.fill")
@@ -465,10 +492,14 @@ struct CurrentGameView: View {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .frame(width: 62, alignment: .leading)
-            TextField("Jugador", text: selection)
-                .textInputAutocapitalization(.words)
+            Spacer(minLength: 8)
+            Text(name)
+                .font(.body.weight(.medium))
                 .multilineTextAlignment(.trailing)
+                .lineLimit(2)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(name)")
     }
 
     private func metric(title: String, value: String) -> some View {
@@ -547,18 +578,18 @@ struct CurrentGameView: View {
         )
     }
 
-    private var whitePlayerBinding: Binding<String> {
-        Binding(
-            get: { board.whitePlayerName },
-            set: { board.setWhitePlayerName($0) }
-        )
+    private var isScreenBoardInteractive: Bool {
+        board.hasActiveGame
+            && !board.isConnected
+            && !board.isEngineTurn
+            && !board.isGameFinished
     }
 
-    private var blackPlayerBinding: Binding<String> {
-        Binding(
-            get: { board.blackPlayerName },
-            set: { board.setBlackPlayerName($0) }
-        )
+    private var screenBoardModeText: String {
+        if board.isConnected { return "Referencia visual · Solo lectura" }
+        if !board.hasActiveGame { return "Preparado · Sin partida" }
+        if board.isEngineTurn { return "Esperando a Stockfish" }
+        return "Tablero interactivo"
     }
 
     private var finishDialogTitle: String {
@@ -771,100 +802,118 @@ private struct OnScreenChessBoard: View {
 
 private struct NewGameSetupView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var mode = GameMode.twoPlayer
-    @State private var sideChoice = HumanSideChoice.white
-    @State private var stockfishLevel = 4
-    @State private var humanAssistance: AssistanceMode
-    @State private var whiteAssistance: AssistanceMode
-    @State private var blackAssistance: AssistanceMode
-    @State private var allowUndo = false
-    @State private var automaticBoardRotation = false
+    @State private var draft: NewGameDraft
 
-    let onStart: (NewGameConfiguration, Bool) -> Void
+    let isPhysicalBoardConnected: Bool
+    let onStart: (NewGameLaunch) -> Void
 
     init(
+        whitePlayerName: String,
+        blackPlayerName: String,
         whiteAssistance: AssistanceMode,
         blackAssistance: AssistanceMode,
-        onStart: @escaping (NewGameConfiguration, Bool) -> Void
+        isPhysicalBoardConnected: Bool,
+        onStart: @escaping (NewGameLaunch) -> Void
     ) {
-        _humanAssistance = State(initialValue: whiteAssistance)
-        _whiteAssistance = State(initialValue: whiteAssistance)
-        _blackAssistance = State(initialValue: blackAssistance)
+        _draft = State(
+            initialValue: NewGameDraft(
+                whitePlayerName: whitePlayerName,
+                blackPlayerName: blackPlayerName,
+                whiteAssistance: whiteAssistance,
+                blackAssistance: blackAssistance
+            )
+        )
+        self.isPhysicalBoardConnected = isPhysicalBoardConnected
         self.onStart = onStart
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("¿Contra quién quieres jugar?") {
-                    Picker("Rival", selection: $mode) {
+                Section("Tipo de partida") {
+                    Picker("Rival", selection: $draft.mode) {
                         ForEach(GameMode.allCases) { mode in
                             Text(mode.displayText).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
 
-                    if mode == .solo {
+                    if draft.mode == .solo {
                         Label(
-                            "Con un tablero físico conectado ejecutarás allí la jugada indicada y la pantalla será una referencia visual. Sin conexión, jugarás directamente en la pantalla.",
+                            isPhysicalBoardConnected
+                                ? "Jugarás en el tablero físico; la pantalla mostrará la posición y la respuesta de Stockfish."
+                                : "Jugarás directamente en el tablero de la pantalla y Stockfish moverá sus piezas automáticamente.",
                             systemImage: "cpu"
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     } else {
                         Label(
-                            "Puedes jugar con ambos bandos en el tablero físico conectado, usando la pantalla como referencia, o directamente en la pantalla sin conexión.",
+                            isPhysicalBoardConnected
+                                ? "Ambos jugadores moverán en el tablero físico conectado."
+                                : "Ambos jugadores moverán directamente en el tablero de la pantalla.",
                             systemImage: "person.2.fill"
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-
-                        Divider()
-
-                        Toggle("Permitir deshacer movimiento", isOn: $allowUndo)
-
-                        Text("Con el tablero físico podrás devolver la jugada allí; en pantalla se deshará inmediatamente.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
-                        Divider()
-
-                        Toggle("Girar automáticamente por turno", isOn: $automaticBoardRotation)
-
-                        Text("Con blancas al turno se mostrarán las blancas abajo; con negras al turno, las negras. Puedes seguir usando el botón Girar manualmente.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                 }
 
-                if mode == .solo {
-                    Section("Tu color") {
-                        Picker("Color", selection: $sideChoice) {
+                Section("Jugadores") {
+                    if draft.mode == .twoPlayer {
+                        playerNameField(
+                            title: "Blancas",
+                            prompt: "Nombre de blancas",
+                            text: $draft.whitePlayerName
+                        )
+                        playerNameField(
+                            title: "Negras",
+                            prompt: "Nombre de negras",
+                            text: $draft.blackPlayerName
+                        )
+                    } else {
+                        TextField("Tu nombre", text: $draft.humanPlayerName, prompt: Text("Jugador"))
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                            .accessibilityLabel("Tu nombre")
+
+                        Picker("Tu color", selection: $draft.sideChoice) {
                             ForEach(HumanSideChoice.allCases) { choice in
                                 Text(choice.displayText).tag(choice)
                             }
                         }
                         .pickerStyle(.segmented)
 
-                        if sideChoice == .random {
-                            Text("El color se sorteará al pulsar Empezar y se mostrará en la partida actual.")
+                        if draft.sideChoice == .random {
+                            Text("El color se sorteará al comenzar.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
                     }
 
+                    if !draft.canStart {
+                        Label(
+                            "Introduce un nombre válido para cada jugador.",
+                            systemImage: "exclamationmark.circle"
+                        )
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if draft.mode == .solo {
                     Section("Nivel de Stockfish") {
                         Stepper(
-                            value: $stockfishLevel,
+                            value: $draft.stockfishLevel,
                             in: StockfishStrength.minimumLevel...StockfishStrength.maximumLevel
                         ) {
-                            LabeledContent("Nivel", value: "\(stockfishLevel)")
+                            LabeledContent("Nivel", value: "\(draft.stockfishLevel)")
                         }
 
                         Slider(
                             value: Binding(
-                                get: { Double(stockfishLevel) },
-                                set: { stockfishLevel = Int($0.rounded()) }
+                                get: { Double(draft.stockfishLevel) },
+                                set: { draft.stockfishLevel = Int($0.rounded()) }
                             ),
                             in: Double(StockfishStrength.minimumLevel)...Double(StockfishStrength.maximumLevel),
                             step: 1
@@ -878,7 +927,7 @@ private struct NewGameSetupView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                        Text(StockfishStrength(level: stockfishLevel).technicalDetailText)
+                        Text(StockfishStrength(level: draft.stockfishLevel).technicalDetailText)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -886,7 +935,7 @@ private struct NewGameSetupView: View {
                     Section("Ayuda para ti") {
                         setupAssistancePicker(
                             title: "Tu ayuda",
-                            selection: $humanAssistance
+                            selection: $draft.humanAssistance
                         )
 
                         Label(
@@ -899,16 +948,52 @@ private struct NewGameSetupView: View {
                     Section("Ayuda por bando") {
                         setupAssistancePicker(
                             title: "Blancas",
-                            selection: $whiteAssistance
+                            selection: $draft.whiteAssistance
                         )
 
                         Divider()
 
                         setupAssistancePicker(
                             title: "Negras",
-                            selection: $blackAssistance
+                            selection: $draft.blackAssistance
                         )
                     }
+
+                    Section("Opciones") {
+                        Toggle("Permitir deshacer movimiento", isOn: $draft.allowUndo)
+
+                        Text("Con tablero físico se deshace devolviendo la jugada; en pantalla el cambio es inmediato.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Toggle("Girar automáticamente por turno", isOn: $draft.automaticBoardRotation)
+
+                        Text("El color al que le toca mover se mostrará abajo. El giro manual seguirá disponible.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Resumen") {
+                    LabeledContent("Partida", value: draft.mode.displayText)
+                    LabeledContent("Jugadores", value: playersSummary)
+                    LabeledContent(
+                        "Tablero",
+                        value: isPhysicalBoardConnected ? "Físico conectado" : "En pantalla"
+                    )
+
+                    Button {
+                        guard let launch = draft.makeLaunch() else { return }
+                        onStart(launch)
+                        dismiss()
+                    } label: {
+                        Label("Comenzar partida", systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!draft.canStart)
+                    .accessibilityHint("Inicia la partida con la configuración mostrada")
                 }
             }
             .navigationTitle("Nueva partida")
@@ -917,45 +1002,41 @@ private struct NewGameSetupView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancelar") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Empezar") {
-                        let humanSide = sideChoice.resolvedSide()
-                        let assistance = mode == .solo
-                            ? AssistanceSettings(
-                                white: humanSide == .white ? humanAssistance : .off,
-                                black: humanSide == .black ? humanAssistance : .off
-                            )
-                            : AssistanceSettings(
-                                white: whiteAssistance,
-                                black: blackAssistance
-                            )
-
-                        onStart(
-                            NewGameConfiguration(
-                                mode: mode,
-                                humanSide: humanSide,
-                                strength: StockfishStrength(level: stockfishLevel),
-                                assistance: assistance,
-                                allowUndo: mode == .twoPlayer && allowUndo
-                            ),
-                            mode == .twoPlayer && automaticBoardRotation
-                        )
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                }
             }
         }
     }
 
     private var soloTurnExplanation: String {
-        switch sideChoice {
+        switch draft.sideChoice {
         case .white:
             "Después de cada jugada tuya, Stockfish responderá; en pantalla la respuesta se ejecutará automáticamente."
         case .black:
             "Stockfish moverá primero; en pantalla su primera jugada se ejecutará automáticamente."
         case .random:
             "Si te corresponden negras, Stockfish moverá primero. En modo pantalla sus jugadas se ejecutan automáticamente."
+        }
+    }
+
+    private var playersSummary: String {
+        switch draft.mode {
+        case .twoPlayer:
+            "\(draft.whitePlayerName.trimmingCharacters(in: .whitespacesAndNewlines)) – \(draft.blackPlayerName.trimmingCharacters(in: .whitespacesAndNewlines))"
+        case .solo:
+            "\(draft.humanPlayerName.trimmingCharacters(in: .whitespacesAndNewlines)) – Stockfish"
+        }
+    }
+
+    private func playerNameField(
+        title: String,
+        prompt: String,
+        text: Binding<String>
+    ) -> some View {
+        LabeledContent(title) {
+            TextField(prompt, text: text)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .multilineTextAlignment(.trailing)
+                .accessibilityLabel("Nombre de \(title.lowercased())")
         }
     }
 
