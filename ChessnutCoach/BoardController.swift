@@ -403,15 +403,17 @@ final class BoardController: ObservableObject {
         assistanceSettings = configuration.assistance
 
         let engineName = "Stockfish 18"
+        let requestedWhiteName = configuration.whitePlayerName ?? whitePlayerName
+        let requestedBlackName = configuration.blackPlayerName ?? blackPlayerName
         let humanName = normalizedHumanName(
-            configuration.humanSide == .white ? whitePlayerName : blackPlayerName
+            configuration.humanSide == .white ? requestedWhiteName : requestedBlackName
         )
         let white = configuration.mode == .solo
             ? (configuration.humanSide == .white ? humanName : engineName)
-            : normalizedNonEnginePlayerName(whitePlayerName, fallback: "Blancas")
+            : normalizedNonEnginePlayerName(requestedWhiteName, fallback: "Blancas")
         let black = configuration.mode == .solo
             ? (configuration.humanSide == .black ? humanName : engineName)
-            : normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
+            : normalizedNonEnginePlayerName(requestedBlackName, fallback: "Negras")
 
         if hasActiveGame && !gameSession.isFinished {
             if gameSession.moves.isEmpty {

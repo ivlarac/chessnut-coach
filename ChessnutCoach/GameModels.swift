@@ -158,6 +158,121 @@ struct NewGameConfiguration: Equatable, Sendable {
     var strength: StockfishStrength = StockfishStrength(level: 4)
     var assistance: AssistanceSettings = AssistanceSettings()
     var allowUndo: Bool = false
+    var whitePlayerName: String?
+    var blackPlayerName: String?
+}
+
+struct NewGameLaunch: Equatable, Sendable {
+    let configuration: NewGameConfiguration
+    let automaticBoardRotation: Bool
+}
+
+/// Editable, UI-independent state for the complete new-game flow.
+/// Keeping this separate from `BoardController` prevents the setup sheet from
+/// mutating an active or archived game before the user confirms it.
+struct NewGameDraft: Equatable, Sendable {
+    var mode = GameMode.twoPlayer
+    var sideChoice = HumanSideChoice.white
+    var stockfishLevel = 4
+    var humanPlayerName: String
+    var whitePlayerName: String
+    var blackPlayerName: String
+    var humanAssistance: AssistanceMode
+    var whiteAssistance: AssistanceMode
+    var blackAssistance: AssistanceMode
+    var allowUndo = false
+    var automaticBoardRotation = false
+
+    init(
+        whitePlayerName: String,
+        blackPlayerName: String,
+        whiteAssistance: AssistanceMode,
+        blackAssistance: AssistanceMode
+    ) {
+        self.whitePlayerName = Self.editableName(whitePlayerName, fallback: "Blancas")
+        self.blackPlayerName = Self.editableName(blackPlayerName, fallback: "Negras")
+        humanPlayerName = Self.preferredHumanName(
+            white: whitePlayerName,
+            black: blackPlayerName
+        )
+        humanAssistance = Self.isSpecificHumanName(blackPlayerName)
+            && !Self.isSpecificHumanName(whitePlayerName)
+            ? blackAssistance
+            : whiteAssistance
+        self.whiteAssistance = whiteAssistance
+        self.blackAssistance = blackAssistance
+    }
+
+    var canStart: Bool {
+        switch mode {
+        case .twoPlayer:
+            Self.isValidHumanName(whitePlayerName) && Self.isValidHumanName(blackPlayerName)
+        case .solo:
+            Self.isValidHumanName(humanPlayerName)
+        }
+    }
+
+    func makeLaunch(randomValue: Bool = Bool.random()) -> NewGameLaunch? {
+        guard canStart else { return nil }
+
+        let humanSide = sideChoice.resolvedSide(randomValue: randomValue)
+        let assistance = mode == .solo
+            ? AssistanceSettings(
+                white: humanSide == .white ? humanAssistance : .off,
+                black: humanSide == .black ? humanAssistance : .off
+            )
+            : AssistanceSettings(
+                white: whiteAssistance,
+                black: blackAssistance
+            )
+        let humanName = Self.trimmed(humanPlayerName)
+        let whiteName = mode == .solo
+            ? (humanSide == .white ? humanName : "Stockfish 18")
+            : Self.trimmed(whitePlayerName)
+        let blackName = mode == .solo
+            ? (humanSide == .black ? humanName : "Stockfish 18")
+            : Self.trimmed(blackPlayerName)
+
+        return NewGameLaunch(
+            configuration: NewGameConfiguration(
+                mode: mode,
+                humanSide: humanSide,
+                strength: StockfishStrength(level: stockfishLevel),
+                assistance: assistance,
+                allowUndo: mode == .twoPlayer && allowUndo,
+                whitePlayerName: whiteName,
+                blackPlayerName: blackName
+            ),
+            automaticBoardRotation: mode == .twoPlayer && automaticBoardRotation
+        )
+    }
+
+    private static func preferredHumanName(white: String, black: String) -> String {
+        if isSpecificHumanName(white) { return trimmed(white) }
+        if isSpecificHumanName(black) { return trimmed(black) }
+        return "Jugador"
+    }
+
+    private static func editableName(_ value: String, fallback: String) -> String {
+        isValidHumanName(value) ? trimmed(value) : fallback
+    }
+
+    private static func isSpecificHumanName(_ value: String) -> Bool {
+        guard isValidHumanName(value) else { return false }
+        let value = trimmed(value)
+        return value.localizedCaseInsensitiveCompare("Blancas") != .orderedSame
+            && value.localizedCaseInsensitiveCompare("Negras") != .orderedSame
+            && value.localizedCaseInsensitiveCompare("Jugador") != .orderedSame
+    }
+
+    private static func isValidHumanName(_ value: String) -> Bool {
+        let value = trimmed(value)
+        return !value.isEmpty && !value.localizedCaseInsensitiveContains("stockfish")
+    }
+
+    private static func trimmed(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 enum WhitePositionEvaluation: Equatable, Sendable {

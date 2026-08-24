@@ -142,6 +142,109 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(StockfishStrength(level: 7).level, 7)
     }
 
+    func testNewGameDraftPreservesEditedPlayerNamesInLaunch() throws {
+        var draft = NewGameDraft(
+            whitePlayerName: "Blancas",
+            blackPlayerName: "Negras",
+            whiteAssistance: .legalMoves,
+            blackAssistance: .off
+        )
+        draft.whitePlayerName = "  Ana  "
+        draft.blackPlayerName = "Luis"
+        draft.whiteAssistance = .blunders
+        draft.blackAssistance = .stockfishQuality
+        draft.allowUndo = true
+        draft.automaticBoardRotation = true
+
+        let launch = try XCTUnwrap(draft.makeLaunch())
+
+        XCTAssertEqual(launch.configuration.mode, .twoPlayer)
+        XCTAssertEqual(launch.configuration.whitePlayerName, "Ana")
+        XCTAssertEqual(launch.configuration.blackPlayerName, "Luis")
+        XCTAssertEqual(
+            launch.configuration.assistance,
+            AssistanceSettings(white: .blunders, black: .stockfishQuality)
+        )
+        XCTAssertTrue(launch.configuration.allowUndo)
+        XCTAssertTrue(launch.automaticBoardRotation)
+    }
+
+    func testSoloNewGameDraftUsesHumanNameAndResolvedColor() throws {
+        var draft = NewGameDraft(
+            whitePlayerName: "Blancas",
+            blackPlayerName: "Negras",
+            whiteAssistance: .off,
+            blackAssistance: .off
+        )
+        draft.mode = .solo
+        draft.sideChoice = .random
+        draft.humanPlayerName = "Iván"
+        draft.humanAssistance = .blunders
+        draft.stockfishLevel = 8
+
+        let launch = try XCTUnwrap(draft.makeLaunch(randomValue: false))
+
+        XCTAssertEqual(launch.configuration.humanSide, .black)
+        XCTAssertEqual(launch.configuration.whitePlayerName, "Stockfish 18")
+        XCTAssertEqual(launch.configuration.blackPlayerName, "Iván")
+        XCTAssertEqual(launch.configuration.strength.level, 8)
+        XCTAssertEqual(
+            launch.configuration.assistance,
+            AssistanceSettings(white: .off, black: .blunders)
+        )
+        XCTAssertFalse(launch.configuration.allowUndo)
+        XCTAssertFalse(launch.automaticBoardRotation)
+    }
+
+    func testNewGameDraftRejectsMissingPlayerName() {
+        var draft = NewGameDraft(
+            whitePlayerName: "Blancas",
+            blackPlayerName: "Negras",
+            whiteAssistance: .off,
+            blackAssistance: .off
+        )
+        draft.whitePlayerName = "   "
+
+        XCTAssertFalse(draft.canStart)
+        XCTAssertNil(draft.makeLaunch())
+    }
+
+#if !SWIFT_PACKAGE
+    @MainActor
+    func testBoardControllerUsesConfiguredNamesAndReturnsToIdleAfterEnding() {
+        let controller = BoardController(library: GameLibrary(inMemory: true))
+        let configuration = NewGameConfiguration(
+            mode: .twoPlayer,
+            assistance: AssistanceSettings(white: .off, black: .off),
+            whitePlayerName: "Ana",
+            blackPlayerName: "Luis"
+        )
+
+        XCTAssertFalse(controller.hasActiveGame)
+
+        controller.newGame(configuration: configuration)
+
+        XCTAssertTrue(controller.hasActiveGame)
+        XCTAssertEqual(controller.whitePlayerName, "Ana")
+        XCTAssertEqual(controller.blackPlayerName, "Luis")
+        XCTAssertEqual(controller.gameResultLabel, "En juego")
+
+        controller.abortGame()
+
+        XCTAssertFalse(controller.hasActiveGame)
+        XCTAssertEqual(controller.moveCount, 0)
+        XCTAssertEqual(controller.gameResultLabel, "Sin partida")
+        XCTAssertTrue(controller.gameStatus.contains("No hay ninguna partida iniciada"))
+
+        controller.newGame(configuration: configuration)
+        controller.agreeDraw()
+
+        XCTAssertFalse(controller.hasActiveGame)
+        XCTAssertEqual(controller.moveCount, 0)
+        XCTAssertEqual(controller.gameResultLabel, "Sin partida")
+    }
+#endif
+
     func testManualAndRandomHumanColorChoicesResolveCorrectly() {
         XCTAssertEqual(HumanSideChoice.white.resolvedSide(randomValue: false), .white)
         XCTAssertEqual(HumanSideChoice.black.resolvedSide(randomValue: true), .black)
