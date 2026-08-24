@@ -7,12 +7,8 @@ enum ReplayPieceColor: Equatable, Sendable {
 }
 
 struct ReplayPiece: Equatable, Sendable {
-    let symbol: String
+    let assetName: String
     let color: ReplayPieceColor
-
-    // U+FE0E forces monochrome text presentation. Without it, iOS renders
-    // some chess characters (especially pawns) as multicolour emoji.
-    var textSymbol: String { symbol + "\u{FE0E}" }
 }
 
 enum ChessBoardPerspective: Equatable, Sendable {
@@ -93,20 +89,18 @@ enum GameReplay {
     }
 
     private static let pieces: [Character: ReplayPiece] = [
-        // Use the filled glyphs for both colours and tint them in SwiftUI.
-        // The outlined Unicode white-piece glyphs have poor contrast on iPhone.
-        "K": ReplayPiece(symbol: "♚", color: .white),
-        "Q": ReplayPiece(symbol: "♛", color: .white),
-        "R": ReplayPiece(symbol: "♜", color: .white),
-        "B": ReplayPiece(symbol: "♝", color: .white),
-        "N": ReplayPiece(symbol: "♞", color: .white),
-        "P": ReplayPiece(symbol: "♟", color: .white),
-        "k": ReplayPiece(symbol: "♚", color: .black),
-        "q": ReplayPiece(symbol: "♛", color: .black),
-        "r": ReplayPiece(symbol: "♜", color: .black),
-        "b": ReplayPiece(symbol: "♝", color: .black),
-        "n": ReplayPiece(symbol: "♞", color: .black),
-        "p": ReplayPiece(symbol: "♟", color: .black),
+        "K": ReplayPiece(assetName: "white_king", color: .white),
+        "Q": ReplayPiece(assetName: "white_queen", color: .white),
+        "R": ReplayPiece(assetName: "white_rook", color: .white),
+        "B": ReplayPiece(assetName: "white_bishop", color: .white),
+        "N": ReplayPiece(assetName: "white_knight", color: .white),
+        "P": ReplayPiece(assetName: "white_pawn", color: .white),
+        "k": ReplayPiece(assetName: "black_king", color: .black),
+        "q": ReplayPiece(assetName: "black_queen", color: .black),
+        "r": ReplayPiece(assetName: "black_rook", color: .black),
+        "b": ReplayPiece(assetName: "black_bishop", color: .black),
+        "n": ReplayPiece(assetName: "black_knight", color: .black),
+        "p": ReplayPiece(assetName: "black_pawn", color: .black),
     ]
 }
 
