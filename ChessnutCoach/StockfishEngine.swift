@@ -243,6 +243,20 @@ actor StockfishEngine {
     }
 }
 
+extension StockfishEngine: AnalysisMoveSearching {
+    func bestMove(
+        fen: String,
+        nodeLimit: UInt64,
+        strength: StockfishStrength
+    ) async throws -> String {
+        try analyze(
+            fen: fen,
+            nodeLimit: nodeLimit,
+            strength: strength
+        ).bestMove
+    }
+}
+
 private func decodeCString(_ buffer: [CChar]) -> String {
     let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
     return String(decoding: bytes, as: UTF8.self)

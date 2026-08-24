@@ -31,18 +31,31 @@ final class ArchivedGameAnalysisController: ObservableObject {
     private var fullGameTask: Task<Void, Never>?
     private var generation = 0
     private var fullGameGeneration = 0
+    private var positionCache: [String: ArchivedPositionAnalysis] = [:]
+    private var requestTracker = AnalysisRequestTracker()
 
     func analyze(fen: String, ply: Int? = nil) {
+        generation += 1
+        let requestedGeneration = generation
+        let requestToken = requestTracker.begin(fen: fen)
+        analysisTask?.cancel()
+
+        if let cached = positionCache[fen] {
+            isAnalyzing = false
+            analysisTask = nil
+            apply(cached)
+            return
+        }
+
         if let ply, let cached = fullGameAnalysis(at: ply) {
+            isAnalyzing = false
+            analysisTask = nil
             apply(cached)
             return
         }
 
         guard !isAnalyzingFullGame else { return }
 
-        generation += 1
-        let requestedGeneration = generation
-        analysisTask?.cancel()
         evaluation = nil
         bestMove = "—"
         status = "Analizando con Stockfish 18…"
@@ -65,18 +78,23 @@ final class ArchivedGameAnalysisController: ObservableObject {
                     nodeLimit: 80_000
                 )
                 try Task.checkCancellation()
-                guard self.generation == requestedGeneration else { return }
+                guard self.generation == requestedGeneration,
+                      self.requestTracker.accepts(requestToken)
+                else { return }
 
                 let positionAnalysis = Self.positionAnalysis(
                     ply: ply ?? 0,
                     fen: fen,
                     analysis: analysis
                 )
+                self.positionCache[fen] = positionAnalysis
                 self.apply(positionAnalysis)
             } catch is CancellationError {
                 // The replay moved to a different ply.
             } catch {
-                guard self.generation == requestedGeneration else { return }
+                guard self.generation == requestedGeneration,
+                      self.requestTracker.accepts(requestToken)
+                else { return }
                 self.status = "No se pudo analizar: \(error.localizedDescription)"
             }
         }
@@ -87,6 +105,7 @@ final class ArchivedGameAnalysisController: ObservableObject {
         let requestedGeneration = fullGameGeneration
 
         generation += 1
+        requestTracker.invalidate()
         analysisTask?.cancel()
         analysisTask = nil
         isAnalyzing = false
@@ -127,6 +146,7 @@ final class ArchivedGameAnalysisController: ObservableObject {
                         fen: fen,
                         analysis: engineAnalysis
                     )
+                    self.positionCache[fen] = sample
                     self.fullGameAnalyses.append(sample)
                     self.fullGameProgress = Double(ply + 1) / Double(totalPositions)
                 }
@@ -161,12 +181,17 @@ final class ArchivedGameAnalysisController: ObservableObject {
     func cancel() {
         generation += 1
         fullGameGeneration += 1
+        requestTracker.invalidate()
         analysisTask?.cancel()
         fullGameTask?.cancel()
         analysisTask = nil
         fullGameTask = nil
         isAnalyzing = false
         isAnalyzingFullGame = false
+    }
+
+    func cachedAnalysis(for fen: String) -> ArchivedPositionAnalysis? {
+        positionCache[fen]
     }
 
     private func apply(_ analysis: ArchivedPositionAnalysis) {
