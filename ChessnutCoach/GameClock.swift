@@ -38,7 +38,7 @@ enum GameTimeControl: Equatable, Codable, Sendable {
     var category: GameTimeCategory? {
         guard case let .fischer(initialSeconds, incrementSeconds) = self else { return nil }
         let estimatedSeconds = initialSeconds + (40 * incrementSeconds)
-        switch estimatedSeconds {
+        return switch estimatedSeconds {
         case ..<180: .bullet
         case ..<600: .blitz
         case ..<1_800: .rapid
