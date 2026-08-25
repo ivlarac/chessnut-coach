@@ -173,11 +173,14 @@ enum PGNExporter {
 
     private static func soloHeaders(for record: GameRecord) -> [String] {
         guard record.mode == .solo else { return [] }
+        let opponent = record.opponentEngine
+            ?? .stockfish(record.engineStrength ?? .full)
         return [
             header("Mode", value: "Solo"),
             header("HumanSide", value: record.humanSide?.displayText ?? "Unknown"),
-            header("Engine", value: record.engineName ?? "Stockfish 18"),
-            header("EngineStrength", value: record.engineStrength?.displayText ?? "Maximum"),
+            header("Engine", value: opponent.displayName),
+            header("EngineKind", value: opponent.kind.rawValue),
+            header("EngineStrength", value: opponent.strengthDisplayText),
         ]
     }
 

@@ -257,6 +257,43 @@ extension StockfishEngine: AnalysisMoveSearching {
     }
 }
 
+/// Stockfish's playing adapter deliberately returns only a move. Objective
+/// scores remain private to `StockfishEngine` and the analysis/coaching paths.
+actor StockfishOpponentEngine: ChessPlayingEngine {
+    nonisolated let kind = OpponentEngineKind.stockfish18
+
+    private let engine: StockfishEngine
+    private let nodeLimit: UInt64
+
+    init(
+        engine: StockfishEngine = StockfishEngine(defaultNodeLimit: 80_000),
+        nodeLimit: UInt64 = 80_000
+    ) {
+        self.engine = engine
+        self.nodeLimit = nodeLimit
+    }
+
+    func move(for request: ChessPlayingRequest) async throws -> ChessPlayingMove {
+        guard request.configuration.kind == kind else {
+            throw ChessPlayingEngineError.inference("La configuración no corresponde a Stockfish 18.")
+        }
+
+        try Task.checkCancellation()
+        let analysis = try await engine.analyze(
+            fen: request.fen,
+            nodeLimit: nodeLimit,
+            strength: request.configuration.stockfishStrength ?? .full
+        )
+        try Task.checkCancellation()
+        _ = try OpponentMoveValidator.validatedMove(uci: analysis.bestMove, fen: request.fen)
+        return ChessPlayingMove(uci: analysis.bestMove)
+    }
+
+    func cancel() async {
+        await engine.stop()
+    }
+}
+
 private func decodeCString(_ buffer: [CChar]) -> String {
     let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
     return String(decoding: bytes, as: UTF8.self)
