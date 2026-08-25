@@ -524,7 +524,7 @@ struct CurrentGameView: View {
         let isActive = board.activeClockSide == side
         let isLow = side == .white ? board.isWhiteLowOnTime : board.isBlackLowOnTime
 
-        HStack(spacing: 12) {
+        return HStack(spacing: 12) {
             Image(systemName: "circle.fill")
                 .foregroundStyle(symbolColor)
                 .shadow(color: .primary.opacity(0.35), radius: symbolColor == .white ? 1 : 0)
