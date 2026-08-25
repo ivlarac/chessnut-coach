@@ -134,7 +134,7 @@ enum PGNExporter {
             header("White", value: normalizedPlayer(record.whitePlayer, fallback: "White")),
             header("Black", value: normalizedPlayer(record.blackPlayer, fallback: "Black")),
             header("Result", value: record.result.pgnValue),
-        ] + setupHeaders(for: record) + soloHeaders(for: record) + [
+        ] + setupHeaders(for: record) + timeControlHeaders(for: record) + soloHeaders(for: record) + [
             header("PlyCount", value: String(record.moves.count)),
             header("Termination", value: termination(for: record)),
         ]
@@ -182,6 +182,11 @@ enum PGNExporter {
             header("EngineKind", value: opponent.kind.rawValue),
             header("EngineStrength", value: opponent.strengthDisplayText),
         ]
+    }
+
+    private static func timeControlHeaders(for record: GameRecord) -> [String] {
+        guard let value = record.timeControl.pgnValue else { return [] }
+        return [header("TimeControl", value: value)]
     }
 
     private static func formattedMoves(
@@ -252,6 +257,7 @@ enum PGNExporter {
     }
 
     private static func termination(for record: GameRecord) -> String {
+        if record.result.isTimeoutResult { return "time forfeit" }
         switch record.status {
         case .playing:
             "unterminated"

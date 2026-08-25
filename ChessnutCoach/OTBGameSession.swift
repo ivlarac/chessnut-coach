@@ -69,7 +69,6 @@ struct OTBGameSession: Sendable {
     private struct PendingPromotion: Sendable {
         let move: Move
         let fenBefore: String
-        let playedAt: Date
         let requiredKind: Piece.Kind?
     }
 
@@ -100,7 +99,8 @@ struct OTBGameSession: Sendable {
         opponentEngine: OpponentEngineConfiguration? = nil,
         engineStrength: StockfishStrength? = nil,
         engineName: String? = nil,
-        allowUndo: Bool = false
+        allowUndo: Bool = false,
+        timeControl: GameTimeControl = .unlimited
     ) {
         board = Board(position: position)
         gameRecord = GameRecord(
@@ -113,7 +113,8 @@ struct OTBGameSession: Sendable {
             opponentEngine: opponentEngine,
             engineStrength: engineStrength,
             engineName: engineName,
-            allowUndo: mode == .twoPlayer && allowUndo
+            allowUndo: mode == .twoPlayer && allowUndo,
+            timeControl: timeControl
         )
         applyTerminalBoardStateIfNeeded(at: startedAt)
     }
@@ -154,6 +155,9 @@ struct OTBGameSession: Sendable {
         pendingPromotion != nil
     }
 
+    var timeControl: GameTimeControl { gameRecord.timeControl }
+    var clockState: GameClockState? { gameRecord.clockState }
+
     var canUndoLastMove: Bool {
         undoFeatureEnabled
             && gameRecord.status == .playing
@@ -172,7 +176,8 @@ struct OTBGameSession: Sendable {
         opponentEngine: OpponentEngineConfiguration? = nil,
         engineStrength: StockfishStrength? = nil,
         engineName: String? = nil,
-        allowUndo: Bool = false
+        allowUndo: Bool = false,
+        timeControl: GameTimeControl = .unlimited
     ) {
         self = OTBGameSession(
             startedAt: startedAt,
@@ -183,8 +188,67 @@ struct OTBGameSession: Sendable {
             opponentEngine: opponentEngine,
             engineStrength: engineStrength,
             engineName: engineName,
-            allowUndo: allowUndo
+            allowUndo: allowUndo,
+            timeControl: timeControl
         )
+    }
+
+    mutating func startClockIfNeeded(at date: Date = Date()) {
+        guard var clock = gameRecord.clockState,
+              clock.activeSide == nil,
+              gameRecord.status == .playing
+        else { return }
+        clock.start(side: Self.playerSide(for: board.position.sideToMove), at: date)
+        gameRecord.clockState = clock
+    }
+
+    mutating func resumeClockAfterSynchronization(at date: Date = Date()) {
+        guard var clock = gameRecord.clockState,
+              clock.activeSide != nil,
+              clock.pauseReason == .initialSetup || clock.pauseReason == .undoSynchronization,
+              gameRecord.status == .playing
+        else { return }
+        clock.resume(at: date)
+        gameRecord.clockState = clock
+    }
+
+    mutating func resumeClockForVirtualBoard(at date: Date = Date()) {
+        guard var clock = gameRecord.clockState,
+              clock.activeSide != nil,
+              clock.pauseReason != nil,
+              gameRecord.status == .playing
+        else { return }
+        clock.resume(at: date)
+        gameRecord.clockState = clock
+    }
+
+    mutating func pauseClockForEngineMoveTransfer(at date: Date = Date()) {
+        guard var clock = gameRecord.clockState,
+              gameRecord.status == .playing
+        else { return }
+        clock.pause(at: date, reason: .engineMoveTransfer)
+        gameRecord.clockState = clock
+    }
+
+    func clockRemaining(for side: PlayerSide, at date: Date = Date()) -> TimeInterval? {
+        gameRecord.clockState?.remaining(for: side, at: date)
+    }
+
+    @discardableResult
+    mutating func processClockTimeoutIfNeeded(at date: Date = Date()) -> PlayerSide? {
+        guard let timedOutSide = gameRecord.clockState?.timedOutSide(at: date),
+              gameRecord.status == .playing
+        else { return nil }
+
+        if case .draw(.insufficientMaterial) = board.state {
+            finish(with: .draw(reason: .insufficientMaterial), at: date)
+        } else {
+            let result: GameResult = timedOutSide == .white
+                ? .blackWin(reason: .timeout)
+                : .whiteWin(reason: .timeout)
+            finish(with: result, at: date)
+        }
+        return timedOutSide
     }
 
     mutating func updatePlayers(white: String, black: String) {
@@ -193,7 +257,10 @@ struct OTBGameSession: Sendable {
     }
 
     @discardableResult
-    mutating func undoLastMove(awaitPhysicalRestore: Bool = true) -> GameMoveRecord? {
+    mutating func undoLastMove(
+        awaitPhysicalRestore: Bool = true,
+        at date: Date = Date()
+    ) -> GameMoveRecord? {
         guard undoFeatureEnabled,
               gameRecord.status == .playing,
               pendingPromotion == nil,
@@ -216,6 +283,13 @@ struct OTBGameSession: Sendable {
         gameRecord.status = .playing
         gameRecord.result = .unfinished
         gameRecord.endedAt = nil
+        if var clock = gameRecord.clockState {
+            _ = clock.undoLastMove(at: date)
+            if awaitPhysicalRestore {
+                clock.pause(at: date, reason: .undoSynchronization)
+            }
+            gameRecord.clockState = clock
+        }
         liftedSquare = nil
         legalTargets = []
         pendingPromotion = nil
@@ -255,6 +329,10 @@ struct OTBGameSession: Sendable {
         legalTargets = []
         pendingPromotion = nil
         isAwaitingPhysicalUndo = false
+        if var clock = gameRecord.clockState {
+            clock.stop(at: date)
+            gameRecord.clockState = clock
+        }
     }
 
     mutating func process(
@@ -263,6 +341,11 @@ struct OTBGameSession: Sendable {
         requiredMove: OTBExpectedMove? = nil
     ) -> OTBGameEvent {
         let physicalPlacement = Self.placementField(from: physicalPlacement)
+
+        if processClockTimeoutIfNeeded(at: date) != nil {
+            isSynchronized = physicalPlacement == logicalPlacement
+            return .invalid(gameRecord.result.displayText)
+        }
 
         if gameRecord.status != .playing {
             isSynchronized = physicalPlacement == logicalPlacement
@@ -296,7 +379,7 @@ struct OTBGameSession: Sendable {
         }
 
         if shouldAutomaticallyUndo(to: physicalPlacement),
-           let undoneMove = undoLastMove(awaitPhysicalRestore: false) {
+           let undoneMove = undoLastMove(awaitPhysicalRestore: false, at: date) {
             return .moveUndone(undoneMove)
         }
 
@@ -405,7 +488,6 @@ struct OTBGameSession: Sendable {
             pendingPromotion = PendingPromotion(
                 move: move,
                 fenBefore: fenBefore,
-                playedAt: date,
                 requiredKind: requiredMove?.promotion
             )
             liftedSquare = nil
@@ -441,7 +523,7 @@ struct OTBGameSession: Sendable {
                 return complete(
                     move: appliedMove,
                     fenBefore: pendingPromotion.fenBefore,
-                    playedAt: pendingPromotion.playedAt
+                    playedAt: date
                 )
             }
 
@@ -474,6 +556,14 @@ struct OTBGameSession: Sendable {
         )
 
         gameRecord.moves.append(record)
+        if var clock = gameRecord.clockState,
+           let position = Position(fen: fenBefore) {
+            _ = clock.completeMove(
+                by: Self.playerSide(for: position.sideToMove),
+                at: playedAt
+            )
+            gameRecord.clockState = clock
+        }
         liftedSquare = nil
         legalTargets = []
         lastMove = detected
@@ -550,6 +640,10 @@ struct OTBGameSession: Sendable {
     }
 
     private mutating func finish(with result: GameResult, at date: Date) {
+        if var clock = gameRecord.clockState {
+            clock.stop(at: date)
+            gameRecord.clockState = clock
+        }
         gameRecord.status = .finished
         gameRecord.result = result
         gameRecord.endedAt = date
@@ -608,6 +702,10 @@ struct OTBGameSession: Sendable {
         case "N": .knight
         default: nil
         }
+    }
+
+    private static func playerSide(for color: Piece.Color) -> PlayerSide {
+        color == .white ? .white : .black
     }
 
     private static func placementField(from fenOrPlacement: String) -> String {

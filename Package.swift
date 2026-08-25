@@ -47,6 +47,7 @@ let package = Package(
                 "GameArchive.swift",
                 "GameAnalysis.swift",
                 "GameAnalysisWorkspace.swift",
+                "GameClock.swift",
                 "GameModels.swift",
                 "OpponentEngine.swift",
                 "OTBGameSession.swift",

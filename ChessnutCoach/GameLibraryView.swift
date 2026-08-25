@@ -23,7 +23,7 @@ struct GameLibraryView: View {
                         .foregroundStyle(.secondary)
                     Text("Sin partidas guardadas")
                         .font(.headline)
-                    Text("La primera partida aparecerá aquí automáticamente al registrar un movimiento.")
+                    Text("Las partidas aparecerán aquí al comenzar a jugar; una partida cronometrada también se conserva antes del primer movimiento.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -99,6 +99,7 @@ private struct GameSummaryRow: View {
             HStack(spacing: 12) {
                 Label("\(game.fullMoveCount) jugadas", systemImage: "arrow.left.arrow.right")
                 Label(formatDuration(game.duration), systemImage: "clock")
+                Label(game.timeControl.notation, systemImage: "timer")
                 if game.mode == .solo {
                     Label("Solitario", systemImage: "person.fill")
                 }
@@ -168,6 +169,7 @@ struct GameDetailView: View {
                     Text(game.startedAt, format: .dateTime.day().month().year().hour().minute())
                 }
                 LabeledContent("Resultado", value: game.result.displayText)
+                LabeledContent("Tiempo", value: game.timeControl.summaryText)
                 LabeledContent("Jugadas", value: "\(game.fullMoveCount) (\(game.moveCount) medios movimientos)")
                 LabeledContent("Duración", value: formatDuration(game.duration))
                 LabeledContent("Modo", value: game.mode.displayText)

@@ -278,14 +278,28 @@ struct CurrentGameView: View {
             playerSummary(
                 title: "Blancas",
                 name: board.whitePlayerName,
-                symbolColor: .white
+                symbolColor: .white,
+                side: .white
             )
             Divider()
             playerSummary(
                 title: "Negras",
                 name: board.blackPlayerName,
-                symbolColor: .black
+                symbolColor: .black,
+                side: .black
             )
+        }
+
+        if board.isClockEnabled {
+            if let pauseLabel = board.clockPauseLabel {
+                Label(pauseLabel, systemImage: "pause.circle.fill")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Label("Ilimitado · Sin reloj", systemImage: "infinity")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
         }
 
         if board.isSoloGame {
@@ -503,8 +517,13 @@ struct CurrentGameView: View {
     private func playerSummary(
         title: String,
         name: String,
-        symbolColor: Color
+        symbolColor: Color,
+        side: PlayerSide
     ) -> some View {
+        let clockText = side == .white ? board.whiteClockText : board.blackClockText
+        let isActive = board.activeClockSide == side
+        let isLow = side == .white ? board.isWhiteLowOnTime : board.isBlackLowOnTime
+
         HStack(spacing: 12) {
             Image(systemName: "circle.fill")
                 .foregroundStyle(symbolColor)
@@ -512,14 +531,37 @@ struct CurrentGameView: View {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .frame(width: 62, alignment: .leading)
-            Spacer(minLength: 8)
-            Text(name)
-                .font(.body.weight(.medium))
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(name)
+                    .font(.body.weight(.medium))
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+
+                if board.isClockEnabled {
+                    Text(clockText)
+                        .font(.system(.title2, design: .monospaced).weight(.bold))
+                        .foregroundStyle(isLow ? Color.red : Color.primary)
+                }
+            }
+        }
+        .padding(.vertical, board.isClockEnabled ? 8 : 0)
+        .padding(.horizontal, board.isClockEnabled ? 10 : 0)
+        .background {
+            if board.isClockEnabled {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isActive ? Color.coachAccent.opacity(0.14) : Color.clear)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(isActive ? Color.coachAccent.opacity(0.55) : Color.clear, lineWidth: 1)
+                    }
+            }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title): \(name)")
+        .accessibilityLabel(
+            board.isClockEnabled
+                ? "\(title): \(name), \(clockText)\(isActive ? ", reloj activo" : "")"
+                : "\(title): \(name)"
+        )
     }
 
     private func metric(title: String, value: String) -> some View {
@@ -953,6 +995,59 @@ private struct NewGameSetupView: View {
                     }
                 }
 
+                Section("Tiempo de partida") {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 105), spacing: 10)],
+                        spacing: 10
+                    ) {
+                        ForEach(GameTimePreset.allCases) { preset in
+                            timePresetCard(preset)
+                        }
+                    }
+                    .padding(.vertical, 4)
+
+                    if draft.timePreset == .custom {
+                        LabeledContent("Minutos por jugador") {
+                            TextField(
+                                "Minutos",
+                                value: $draft.customInitialMinutes,
+                                format: .number
+                            )
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(minWidth: 64)
+                        }
+
+                        LabeledContent("Incremento por jugada") {
+                            HStack(spacing: 4) {
+                                TextField(
+                                    "Segundos",
+                                    value: $draft.customIncrementSeconds,
+                                    format: .number
+                                )
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                Text("s")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(minWidth: 72)
+                        }
+
+                        if draft.resolvedTimeControl == nil {
+                            Label(
+                                "Usa entre \(GameTimeLimits.initialMinutes.lowerBound) y \(GameTimeLimits.initialMinutes.upperBound) minutos, y entre \(GameTimeLimits.incrementSeconds.lowerBound) y \(GameTimeLimits.incrementSeconds.upperBound) segundos de incremento.",
+                                systemImage: "exclamationmark.circle"
+                            )
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                        }
+                    }
+
+                    Text("El incremento Fischer se añade al completar una jugada legal. Ilimitado conserva el funcionamiento sin reloj.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 if draft.mode == .solo && draft.opponentEngineKind == .stockfish18 {
                     Section("Nivel de Stockfish") {
                         Stepper(
@@ -1068,6 +1163,10 @@ private struct NewGameSetupView: View {
                 Section("Resumen") {
                     LabeledContent("Partida", value: draft.mode.displayText)
                     LabeledContent("Jugadores", value: playersSummary)
+                    LabeledContent(
+                        "Tiempo",
+                        value: draft.resolvedTimeControl?.summaryText ?? "Configuración inválida"
+                    )
                     if draft.mode == .solo {
                         LabeledContent("Motor", value: draft.opponentEngineConfiguration.displayName)
                     }
@@ -1119,6 +1218,38 @@ private struct NewGameSetupView: View {
         case .solo:
             "\(draft.humanPlayerName.trimmingCharacters(in: .whitespacesAndNewlines)) – \(draft.opponentEngineConfiguration.displayName)"
         }
+    }
+
+    private func timePresetCard(_ preset: GameTimePreset) -> some View {
+        let isSelected = draft.timePreset == preset
+        return Button {
+            draft.timePreset = preset
+        } label: {
+            VStack(spacing: 3) {
+                Text(preset.notation)
+                    .font(.title3.weight(.bold))
+                    .minimumScaleFactor(0.75)
+                    .lineLimit(1)
+                Text(preset.categoryText)
+                    .font(.caption)
+                    .foregroundStyle(isSelected ? Color.coachAccent : Color.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 58)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? Color.coachAccent.opacity(0.14) : Color(uiColor: .secondarySystemGroupedBackground))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? Color.coachAccent : Color.secondary.opacity(0.25), lineWidth: isSelected ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(preset.notation), \(preset.categoryText)")
+        .accessibilityValue(isSelected ? "Seleccionado" : "No seleccionado")
+        .accessibilityHint("Selecciona este control de tiempo")
     }
 
     private func playerNameField(
