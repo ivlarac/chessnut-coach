@@ -258,7 +258,7 @@ enum PGNExporter {
 
     private static func termination(for record: GameRecord) -> String {
         if record.result.isTimeoutResult { return "time forfeit" }
-        switch record.status {
+        return switch record.status {
         case .playing:
             "unterminated"
         case .aborted:
