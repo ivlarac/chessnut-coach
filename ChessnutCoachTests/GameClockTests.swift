@@ -115,7 +115,7 @@ final class GameClockTests: XCTestCase {
         ) else { return XCTFail("Expected returned piece") }
         XCTAssertEqual(session.clockState?.activeSide, .white)
 
-        let intermediate = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR"
+        let intermediate = "rnbqkbnr/pppp1ppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
         guard case .intermediate = session.process(
             physicalPlacement: intermediate,
             at: start.addingTimeInterval(3)
