@@ -60,6 +60,8 @@ struct CurrentGameView: View {
                     blackPlayerName: board.blackPlayerName,
                     whiteAssistance: board.whiteAssistanceMode,
                     blackAssistance: board.blackAssistanceMode,
+                    maximumAssistancePieces: board.maximumAssistancePieces,
+                    blunderThreshold: board.blunderThreshold,
                     isPhysicalBoardConnected: board.isConnected
                 ) { launch in
                     automaticBoardRotationEnabled = launch.automaticBoardRotation
@@ -431,6 +433,24 @@ struct CurrentGameView: View {
             )
             .disabled(board.hasActiveGame && board.isSoloGame && board.humanSide == .white)
 
+            Divider()
+
+            Picker("Máximo de piezas con ayuda", selection: maximumAssistancePiecesBinding) {
+                ForEach(AssistancePieceLimit.allCases) { limit in
+                    Text(limit.displayText).tag(limit)
+                }
+            }
+
+            Text("Limita cuántas piezas diferentes puedes consultar en cada turno para fomentar el cálculo antes de pedir ayuda.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            Picker("Pérdida para considerar error grave", selection: blunderThresholdBinding) {
+                ForEach(BlunderThreshold.allCases) { threshold in
+                    Text(threshold.displayText).tag(threshold)
+                }
+            }
+
             if board.isConnected && !board.supportsLEDs {
                 Text("Este tablero no puede mostrar ayudas con LEDs físicos; las ayudas configuradas aparecerán como puntos verdes en el tablero virtual.")
                     .font(.footnote)
@@ -443,7 +463,7 @@ struct CurrentGameView: View {
                     .foregroundStyle(Color.coachAccent)
             }
 
-            Text("Calidad Stockfish: fijo hasta 50 cp, lento entre 51 y 200 cp y rápido por encima de 200 cp.")
+            Text("Calidad Stockfish: fijo hasta 50 cp, lento por debajo del umbral y rápido a partir de \(board.blunderThreshold.rawValue) cp.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -575,6 +595,20 @@ struct CurrentGameView: View {
         Binding(
             get: { board.blackAssistanceMode },
             set: { board.setBlackAssistanceMode($0) }
+        )
+    }
+
+    private var maximumAssistancePiecesBinding: Binding<AssistancePieceLimit> {
+        Binding(
+            get: { board.maximumAssistancePieces },
+            set: { board.setMaximumAssistancePieces($0) }
+        )
+    }
+
+    private var blunderThresholdBinding: Binding<BlunderThreshold> {
+        Binding(
+            get: { board.blunderThreshold },
+            set: { board.setBlunderThreshold($0) }
         )
     }
 
@@ -812,6 +846,8 @@ private struct NewGameSetupView: View {
         blackPlayerName: String,
         whiteAssistance: AssistanceMode,
         blackAssistance: AssistanceMode,
+        maximumAssistancePieces: AssistancePieceLimit,
+        blunderThreshold: BlunderThreshold,
         isPhysicalBoardConnected: Bool,
         onStart: @escaping (NewGameLaunch) -> Void
     ) {
@@ -820,7 +856,9 @@ private struct NewGameSetupView: View {
                 whitePlayerName: whitePlayerName,
                 blackPlayerName: blackPlayerName,
                 whiteAssistance: whiteAssistance,
-                blackAssistance: blackAssistance
+                blackAssistance: blackAssistance,
+                maximumAssistancePieces: maximumAssistancePieces,
+                blunderThreshold: blunderThreshold
             )
         )
         self.isPhysicalBoardConnected = isPhysicalBoardConnected
@@ -972,6 +1010,28 @@ private struct NewGameSetupView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                Section("Límites de ayuda") {
+                    Picker("Máximo de piezas con ayuda", selection: $draft.maximumAssistancePieces) {
+                        ForEach(AssistancePieceLimit.allCases) { limit in
+                            Text(limit.displayText).tag(limit)
+                        }
+                    }
+
+                    Text("El límite cuenta piezas de origen distintas durante el turno. Volver a consultar una ya utilizada no consume otra.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Picker("Pérdida para considerar error grave", selection: $draft.blunderThreshold) {
+                        ForEach(BlunderThreshold.allCases) { threshold in
+                            Text(threshold.displayText).tag(threshold)
+                        }
+                    }
+
+                    Text("La pérdida se calcula desde el punto de vista de quien mueve. Los mates forzados se comparan como resultados decisivos, no como centipeones.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Resumen") {

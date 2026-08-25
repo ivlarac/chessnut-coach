@@ -392,6 +392,61 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(settings.mode(for: .black), .legalMoves)
     }
 
+    func testAssistanceSettingsDecodeLegacyValuesWithCompatibleDefaults() throws {
+        let legacy = Data(#"{"white":"legalMoves","black":"off"}"#.utf8)
+
+        let settings = try JSONDecoder().decode(AssistanceSettings.self, from: legacy)
+
+        XCTAssertEqual(settings.white, .legalMoves)
+        XCTAssertEqual(settings.black, .off)
+        XCTAssertEqual(settings.maximumPiecesPerTurn, .unlimited)
+        XCTAssertEqual(settings.blunderThreshold, .twoHundred)
+    }
+
+    func testThreePieceLimitAllowsFirstThreeAndPreviouslyConsultedSources() {
+        var policy = TurnAssistanceAccessPolicy(limit: .three)
+
+        XCTAssertTrue(policy.requestAssistance(for: .g1))
+        XCTAssertTrue(policy.requestAssistance(for: .b1))
+        XCTAssertTrue(policy.requestAssistance(for: .e2))
+        XCTAssertFalse(policy.requestAssistance(for: .d2))
+        XCTAssertTrue(policy.requestAssistance(for: .g1))
+        XCTAssertTrue(policy.requestAssistance(for: .e2))
+        XCTAssertEqual(policy.consultedSources, Set([.g1, .b1, .e2]))
+    }
+
+    func testUnlimitedPieceAssistancePreservesExistingBehavior() {
+        var policy = TurnAssistanceAccessPolicy(limit: .unlimited)
+
+        for square in [Square.a2, .b2, .c2, .d2, .e2, .f2, .g2, .h2] {
+            XCTAssertTrue(policy.requestAssistance(for: square))
+        }
+        XCTAssertEqual(policy.consultedSources.count, 8)
+    }
+
+    func testOnePieceLimitDoesNotChargeRepeatedConsultation() {
+        var policy = TurnAssistanceAccessPolicy(limit: .one)
+
+        XCTAssertTrue(policy.requestAssistance(for: .g1))
+        XCTAssertFalse(policy.requestAssistance(for: .b1))
+        XCTAssertTrue(policy.requestAssistance(for: .g1))
+    }
+
+    func testAssistanceLimitResetsOnlyForCompletedTurnEvents() {
+        var policy = TurnAssistanceAccessPolicy(limit: .one)
+        XCTAssertTrue(policy.requestAssistance(for: .e2))
+
+        policy.handle(.synchronized)
+        policy.handle(.intermediate("Recolocación en curso"))
+        policy.handle(.promotionRequired(square: .a8, legalKinds: [.queen]))
+        XCTAssertFalse(policy.requestAssistance(for: .d2))
+
+        policy.handle(
+            .moveCompleted(OTBDetectedMove(from: .a7, to: .a8, san: "a8=Q"))
+        )
+        XCTAssertTrue(policy.requestAssistance(for: .d2))
+    }
+
     func testLegalMoveAssistanceUsesOnlySteadyLEDs() {
         let hints = AssistanceHintPlanner.hints(
             for: [.e4, .e3],
@@ -434,12 +489,22 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(thresholds.classify(loss: 0), .good)
         XCTAssertEqual(thresholds.classify(loss: 50), .good)
         XCTAssertEqual(thresholds.classify(loss: 51), .acceptable)
-        XCTAssertEqual(thresholds.classify(loss: 200), .acceptable)
+        XCTAssertEqual(thresholds.classify(loss: 199), .acceptable)
+        XCTAssertEqual(thresholds.classify(loss: 200), .blunder)
         XCTAssertEqual(thresholds.classify(loss: 201), .blunder)
 
         XCTAssertEqual(MoveQuality.good.ledPattern, .steady)
         XCTAssertEqual(MoveQuality.acceptable.ledPattern, .slowBlink)
         XCTAssertEqual(MoveQuality.blunder.ledPattern, .fastBlink)
+    }
+
+    func testConfigurableBlunderThresholdCoversBelowExactAndAboveValues() {
+        let thresholds = MoveQualityThresholds(blunderThreshold: .twoHundredFifty)
+
+        XCTAssertEqual(thresholds.classify(loss: 249), .acceptable)
+        XCTAssertEqual(thresholds.classify(loss: 250), .blunder)
+        XCTAssertEqual(thresholds.classify(loss: 251), .blunder)
+        XCTAssertEqual(thresholds.classify(loss: .decisive), .blunder)
     }
 
     func testLifecycleInvalidatesTransientWorkOnlyAtBackgroundAndResumeBoundaries() {
@@ -947,6 +1012,63 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(controller.blackAssistanceMode, .blunders)
     }
 
+    @MainActor
+    func testVirtualBoardSharesPieceLimitAndStillAllowsBlockedPieceMove() {
+        let controller = BoardController(
+            library: GameLibrary(inMemory: true),
+            preferences: UserDefaults(suiteName: UUID().uuidString)!
+        )
+        controller.newGame(
+            configuration: NewGameConfiguration(
+                assistance: AssistanceSettings(
+                    white: .legalMoves,
+                    black: .legalMoves,
+                    maximumPiecesPerTurn: .three
+                )
+            )
+        )
+
+        controller.handleScreenSquareTap("g1")
+        XCTAssertFalse(controller.screenHints.isEmpty)
+        controller.handleScreenSquareTap("b1")
+        XCTAssertFalse(controller.screenHints.isEmpty)
+        controller.handleScreenSquareTap("e2")
+        XCTAssertFalse(controller.screenHints.isEmpty)
+
+        controller.handleScreenSquareTap("d2")
+        XCTAssertTrue(controller.screenHints.isEmpty)
+        XCTAssertTrue(controller.gameStatus.contains("máximo de piezas"))
+
+        controller.handleScreenSquareTap("g1")
+        XCTAssertFalse(controller.screenHints.isEmpty)
+
+        controller.handleScreenSquareTap("d2")
+        controller.handleScreenMove(from: "d2", to: "d4")
+        XCTAssertEqual(controller.moveCount, 1, "The limit must never block a legal move")
+
+        controller.handleScreenSquareTap("e7")
+        XCTAssertFalse(controller.screenHints.isEmpty, "A completed move starts a fresh turn quota")
+    }
+
+    @MainActor
+    func testAssistanceLimitAndBlunderThresholdPersistAsDefaults() {
+        let preferences = UserDefaults(suiteName: UUID().uuidString)!
+        let first = BoardController(
+            library: GameLibrary(inMemory: true),
+            preferences: preferences
+        )
+
+        first.setMaximumAssistancePieces(.four)
+        first.setBlunderThreshold(.threeHundred)
+
+        let restored = BoardController(
+            library: GameLibrary(inMemory: true),
+            preferences: preferences
+        )
+        XCTAssertEqual(restored.maximumAssistancePieces, .four)
+        XCTAssertEqual(restored.blunderThreshold, .threeHundred)
+    }
+
     func testMonitoredTransportBroadcastsDisconnectWithoutHidingItFromClientStream() async {
         let underlying = TestEasyLinkTransport()
         let monitored = MonitoredEasyLinkTransport(wrapping: underlying)
@@ -1053,8 +1175,48 @@ final class OTBGameSessionTests: XCTestCase {
     func testStockfishScoreInversionAndOrderingForCoaching() {
         XCTAssertEqual(StockfishScore.centipawns(-42).inverted, .centipawns(42))
         XCTAssertEqual(StockfishScore.mate(5).inverted, .mate(-5))
-        XCTAssertGreaterThan(StockfishScore.mate(5).coachingValue, StockfishScore.centipawns(10_000).coachingValue)
-        XCTAssertLessThan(StockfishScore.mate(-5).coachingValue, StockfishScore.centipawns(-10_000).coachingValue)
+        XCTAssertTrue(StockfishScore.mate(5).isBetterForCoaching(than: .centipawns(10_000)))
+        XCTAssertTrue(StockfishScore.centipawns(-10_000).isBetterForCoaching(than: .mate(-5)))
+        XCTAssertTrue(StockfishScore.mate(3).isBetterForCoaching(than: .mate(7)))
+        XCTAssertTrue(StockfishScore.mate(-9).isBetterForCoaching(than: .mate(-3)))
+    }
+
+    func testCentipawnLossUsesMoverPointOfViewForBlackAndSignChanges() {
+        let baselineForBlack = StockfishScore.centipawns(50)
+        let afterMoveFromWhitePointOfView = StockfishScore.centipawns(250)
+        let afterMoveForBlack = afterMoveFromWhitePointOfView.inverted
+
+        XCTAssertEqual(
+            afterMoveForBlack.coachingLoss(comparedWith: baselineForBlack),
+            .centipawns(300)
+        )
+    }
+
+    func testMateTransitionsAreClassifiedWithoutSyntheticCentipawns() {
+        let thresholds = MoveQualityThresholds(blunderThreshold: .fiveHundred)
+
+        XCTAssertEqual(
+            StockfishScore.centipawns(400).coachingLoss(comparedWith: .mate(5)),
+            .decisive
+        )
+        XCTAssertEqual(
+            StockfishScore.mate(-3).coachingLoss(comparedWith: .centipawns(-500)),
+            .decisive
+        )
+        XCTAssertEqual(
+            StockfishScore.mate(9).coachingLoss(comparedWith: .mate(5)),
+            .centipawns(0)
+        )
+        XCTAssertEqual(
+            StockfishScore.mate(3).coachingLoss(comparedWith: .centipawns(0)),
+            .centipawns(0)
+        )
+        XCTAssertEqual(
+            thresholds.classify(
+                loss: StockfishScore.centipawns(400).coachingLoss(comparedWith: .mate(5))
+            ),
+            .blunder
+        )
     }
 
     func testBlunderModeSummaryDoesNotRevealGoodVersusAcceptableMoves() {

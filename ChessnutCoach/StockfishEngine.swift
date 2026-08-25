@@ -38,33 +38,76 @@ enum StockfishScore: Equatable, Sendable {
         }
     }
 
-    /// Common ordering scale used only for coaching comparisons. Centipawn
-    /// scores keep their natural units; forced mates/tablebase outcomes sit far
-    /// outside normal evaluation values so losing a forced result is classified
-    /// decisively while differences in mate distance remain small.
-    var coachingValue: Int {
-        switch self {
-        case let .centipawns(value):
-            return value
-        case let .mate(plies):
-            if plies >= 0 {
-                return 100_000 - min(abs(plies), 10_000)
-            }
-            return -100_000 + min(abs(plies), 10_000)
-        case let .tablebase(plies):
-            if plies >= 0 {
-                return 50_000 - min(abs(plies), 10_000)
-            }
-            return -50_000 + min(abs(plies), 10_000)
-        }
-    }
-
     func centipawnLoss(comparedWith best: StockfishScore) -> Int? {
         guard case let .centipawns(bestValue) = best,
               case let .centipawns(candidateValue) = self
         else { return nil }
 
         return max(0, bestValue - candidateValue)
+    }
+
+    /// Compares engine scores without pretending that mate distance is a
+    /// centipawn value. Losing a forced win or allowing a forced loss is a
+    /// decisive deterioration; scores inside the same forced-result category
+    /// remain comparable without an arbitrary numeric sentinel.
+    func coachingLoss(comparedWith best: StockfishScore) -> MoveEvaluationLoss {
+        let bestCategory = best.coachingCategory
+        let candidateCategory = coachingCategory
+
+        if case let .centipawns(bestValue) = bestCategory,
+           case let .centipawns(candidateValue) = candidateCategory {
+            return .centipawns(max(0, bestValue - candidateValue))
+        }
+
+        return candidateCategory.rank < bestCategory.rank
+            ? .decisive
+            : .centipawns(0)
+    }
+
+    func isBetterForCoaching(than other: StockfishScore) -> Bool {
+        let lhs = coachingCategory
+        let rhs = other.coachingCategory
+        guard lhs.rank == rhs.rank else { return lhs.rank > rhs.rank }
+
+        switch (lhs, rhs) {
+        case let (.centipawns(left), .centipawns(right)):
+            return left > right
+        case let (.forcedWin(leftDistance), .forcedWin(rightDistance)):
+            return leftDistance < rightDistance
+        case let (.forcedLoss(leftDistance), .forcedLoss(rightDistance)):
+            return leftDistance > rightDistance
+        default:
+            return false
+        }
+    }
+
+    private enum CoachingCategory {
+        case forcedLoss(distance: Int)
+        case centipawns(Int)
+        case forcedWin(distance: Int)
+
+        var rank: Int {
+            switch self {
+            case .forcedLoss: 0
+            case .centipawns: 1
+            case .forcedWin: 2
+            }
+        }
+    }
+
+    private var coachingCategory: CoachingCategory {
+        switch self {
+        case let .centipawns(value):
+            return .centipawns(value)
+        case let .mate(plies):
+            return plies >= 0
+                ? .forcedWin(distance: abs(plies))
+                : .forcedLoss(distance: abs(plies))
+        case let .tablebase(value):
+            if value > 0 { return .forcedWin(distance: abs(value)) }
+            if value < 0 { return .forcedLoss(distance: abs(value)) }
+            return .centipawns(0)
+        }
     }
 }
 
@@ -268,7 +311,7 @@ actor StockfishMoveCoach {
     private let engine: StockfishEngine
     private let baselineNodeLimit: UInt64
     private let candidateNodeLimit: UInt64
-    private let thresholds: MoveQualityThresholds
+    private let defaultThresholds: MoveQualityThresholds
 
     private var cachedBaselineFEN: String?
     private var cachedBaseline: StockfishAnalysis?
@@ -282,7 +325,7 @@ actor StockfishMoveCoach {
         self.engine = engine
         self.baselineNodeLimit = baselineNodeLimit
         self.candidateNodeLimit = candidateNodeLimit
-        self.thresholds = thresholds
+        defaultThresholds = thresholds
     }
 
     func prepare(fen: String) async {
@@ -292,7 +335,8 @@ actor StockfishMoveCoach {
     func evaluate(
         fen: String,
         source: Square,
-        legalTargets: [Square]
+        legalTargets: [Square],
+        thresholds: MoveQualityThresholds? = nil
     ) async throws -> StockfishCoachingResult {
         guard !legalTargets.isEmpty else {
             throw StockfishEngineError.search("La pieza levantada no tiene destinos legales que analizar.")
@@ -325,7 +369,7 @@ actor StockfishMoveCoach {
                 // opponent's side-to-move. Invert it back to the player who
                 // lifted the piece so every score shares the baseline POV.
                 let moverScore = analysis.score.inverted
-                if bestMoverScore == nil || moverScore.coachingValue > bestMoverScore!.coachingValue {
+                if bestMoverScore == nil || moverScore.isBetterForCoaching(than: bestMoverScore!) {
                     bestMoverScore = moverScore
                 }
             }
@@ -334,8 +378,8 @@ actor StockfishMoveCoach {
                 throw StockfishEngineError.search("No se pudo evaluar el destino \(target.notation).")
             }
 
-            let coachingLoss = max(0, baseline.score.coachingValue - moverScore.coachingValue)
-            let quality = thresholds.classify(loss: coachingLoss)
+            let coachingLoss = moverScore.coachingLoss(comparedWith: baseline.score)
+            let quality = (thresholds ?? defaultThresholds).classify(loss: coachingLoss)
             let exactCentipawnLoss = moverScore.centipawnLoss(comparedWith: baseline.score)
 
             hints.append(
