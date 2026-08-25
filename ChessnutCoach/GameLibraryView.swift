@@ -123,7 +123,8 @@ private struct GameSummaryRow: View {
 }
 
 struct GameDetailView: View {
-    let game: GameRecord
+    @ObservedObject private var library: GameLibrary
+    @State private var game: GameRecord
     @State private var selectedPly: Int
     @State private var boardPerspective = ChessBoardPerspective.whiteAtBottom
     @State private var isExporting = false
@@ -137,8 +138,9 @@ struct GameDetailView: View {
 
     @MainActor
     init(game: GameRecord, library: GameLibrary) {
-        self.game = game
-        let initialPly = game.status == .finished ? 0 : game.moves.count
+        _library = ObservedObject(wrappedValue: library)
+        _game = State(initialValue: game)
+        let initialPly = game.allowsAnalysis ? 0 : game.moves.count
         let analysisController = ArchivedGameAnalysisController()
         _selectedPly = State(initialValue: initialPly)
         _exportDocument = State(initialValue: PGNFileDocument(text: PGNExporter.pgn(for: game)))
@@ -182,8 +184,8 @@ struct GameDetailView: View {
                 }
             }
 
-            Section(game.status == .finished ? "Análisis" : "Reproducción") {
-                if game.status == .finished {
+            Section(game.allowsAnalysis ? "Análisis" : "Reproducción") {
+                if game.allowsAnalysis {
                     HStack {
                         Label(workspace.mode.displayText, systemImage: modeSymbol)
                             .font(.subheadline.weight(.semibold))
@@ -374,7 +376,7 @@ struct GameDetailView: View {
                 }
             }
 
-            if game.status == .finished {
+            if game.allowsAnalysis {
                 Section("Variantes") {
                     if workspace.variationRows.isEmpty {
                         Text("Todavía no hay variantes. Sitúate en una posición y pulsa «Explorar variante».")
@@ -422,7 +424,7 @@ struct GameDetailView: View {
                 }
             }
 
-            if game.status == .finished {
+            if game.allowsAnalysis {
                 Section("Análisis completo") {
                     if analysis.isAnalyzingFullGame {
                         ProgressView(value: analysis.fullGameProgress) {
@@ -527,11 +529,29 @@ struct GameDetailView: View {
         }
         .navigationTitle("Detalle")
         .task {
-            if game.status == .finished {
+            if game.allowsAnalysis {
                 analysis.analyze(
                     fen: workspace.currentFEN,
                     ply: workspace.currentMainlinePly
                 )
+            }
+        }
+        .onReceive(library.$games) { games in
+            guard let updatedGame = games.first(where: { $0.id == game.id }),
+                  updatedGame != game
+            else { return }
+
+            let becameAnalysisAvailable = !game.allowsAnalysis
+                && updatedGame.allowsAnalysis
+            game = updatedGame
+            workspace.synchronize(with: updatedGame)
+            exportDocument = PGNFileDocument(text: PGNExporter.pgn(for: updatedGame))
+            shareFileURL = try? PGNShareFile.make(for: updatedGame)
+
+            if becameAnalysisAvailable {
+                selectedPly = 0
+            } else if !updatedGame.allowsAnalysis {
+                selectedPly = updatedGame.moves.count
             }
         }
         .onDisappear {

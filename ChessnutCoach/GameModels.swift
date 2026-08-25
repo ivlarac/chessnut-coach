@@ -572,6 +572,7 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
 
     var moveCount: Int { moves.count }
     var fullMoveCount: Int { (moves.count + 1) / 2 }
+    var allowsAnalysis: Bool { status != .playing }
 
     var lastActivityAt: Date {
         endedAt ?? moves.last?.playedAt ?? startedAt

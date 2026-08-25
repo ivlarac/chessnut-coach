@@ -223,6 +223,81 @@ final class GameAnalysisTreeTests: XCTestCase {
 
 @MainActor
 final class GameAnalysisWorkspaceTests: XCTestCase {
+    func testAbortedGameKeepsEvaluationAndVariationWorkspaceAvailable() throws {
+        var game = try makeGame(["e2e4"])
+        game.status = .aborted
+        game.result = .unfinished
+        game.endedAt = Date()
+        let workspace = GameAnalysisWorkspace(
+            game: game,
+            initialPly: 1,
+            engine: ScriptedAnalysisEngine(moves: []),
+            onSave: { _ in }
+        )
+
+        XCTAssertTrue(game.allowsAnalysis)
+        workspace.exploreCurrentPosition()
+        XCTAssertTrue(workspace.isExploring)
+        XCTAssertTrue(workspace.canMovePieces)
+
+        workspace.startPlaying(
+            AnalysisPlayConfiguration(
+                humanSide: .black,
+                strength: StockfishStrength(level: 4)
+            )
+        )
+        XCTAssertNotNil(workspace.playConfiguration)
+        workspace.stopPlaying()
+    }
+
+    func testPresentedPlayingGameUnlocksAnalysisWhenPersistedRecordFinishes() throws {
+        var playing = try makeGame(["e2e4"])
+        playing.status = .playing
+        playing.result = .unfinished
+        playing.endedAt = nil
+        let workspace = GameAnalysisWorkspace(
+            game: playing,
+            initialPly: playing.moves.count,
+            engine: ScriptedAnalysisEngine(moves: []),
+            onSave: { _ in }
+        )
+
+        XCTAssertFalse(workspace.game.allowsAnalysis)
+        var finished = playing
+        finished.status = .finished
+        finished.result = .draw(reason: .agreement)
+        finished.endedAt = Date()
+
+        workspace.synchronize(with: finished)
+
+        XCTAssertTrue(workspace.game.allowsAnalysis)
+        XCTAssertEqual(workspace.currentReference, .mainline(ply: 0))
+        workspace.exploreCurrentPosition()
+        XCTAssertTrue(workspace.isExploring)
+    }
+
+    func testTimedMaiaArchiveStillUsesIndependentStockfishAnalysisWorkspace() throws {
+        var game = try makeGame(["e2e4"])
+        game.mode = .solo
+        game.humanSide = .white
+        game.opponentEngine = .maia3(Maia3Strength(rating: 800))
+        game.timeControl = .fischer(initialSeconds: 300, incrementSeconds: 3)
+        let workspace = GameAnalysisWorkspace(
+            game: game,
+            initialPly: 1,
+            engine: ScriptedAnalysisEngine(moves: []),
+            onSave: { _ in }
+        )
+
+        workspace.exploreCurrentPosition()
+        workspace.handleMove(from: "e7", to: "e5")
+
+        XCTAssertTrue(workspace.isExploring)
+        guard case .variation = workspace.currentReference else {
+            return XCTFail("Expected a variation for a timed Maia archive")
+        }
+    }
+
     func testSelectingVariationRequestsAnalysisForItsFullFEN() throws {
         let game = try makeGame([])
         let engine = ScriptedAnalysisEngine(moves: [])
