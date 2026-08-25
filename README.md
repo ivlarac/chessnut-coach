@@ -31,7 +31,7 @@ La fase 5 conecta **Stockfish 18** con la ayuda física del Chessnut Air:
 - cada destino se compara contra la **mejor jugada global de la posición**, no sólo contra la mejor jugada de la pieza levantada;
 - pérdida de hasta 50 centipeones: **bueno → LED fijo**;
 - pérdida de 51 a 200 centipeones: **aceptable → parpadeo lento**;
-- pérdida superior a 200 centipeones: **blunder → parpadeo rápido**;
+- pérdida desde el umbral configurable (200 cp por defecto): **blunder → parpadeo rápido**;
 - el modo **Blunders** conserva fijos todos los destinos buenos o aceptables y sólo hace parpadear rápido los errores graves;
 - si se devuelve o mueve la pieza mientras Stockfish analiza, el resultado anterior se descarta y no puede encender LEDs atrasados;
 - en una promoción se analizan dama, torre, alfil y caballo y la casilla utiliza la valoración de la mejor promoción;
@@ -119,6 +119,8 @@ Blancas y negras se configuran de forma independiente:
 - **Calidad**: Stockfish 18 distingue bueno, aceptable y blunder con los tres patrones LED;
 - **Blunders**: todos los destinos legales quedan fijos y únicamente los errores graves parpadean rápido.
 
+La configuración de partida permite limitar las piezas de origen distintas que pueden consultar ayuda en cada turno (`Sin límite` o entre 1 y 5). Volver a levantar o seleccionar una pieza ya admitida sigue mostrando sus ayudas; una pieza nueva que supere el cupo puede moverse con normalidad, pero no revela LEDs, puntos ni análisis. El conjunto se reinicia únicamente cuando `OTBGameSession` confirma una jugada completa, no durante capturas, enroques, promociones o recolocaciones intermedias.
+
 Por defecto, durante la validación de fase 5:
 
 - Blancas: **Calidad**;
@@ -131,14 +133,14 @@ La referencia es la mejor jugada global encontrada por Stockfish en la posición
 | Pérdida | Calidad | LED |
 | ---: | --- | --- |
 | 0–50 cp | Bueno | Fijo |
-| 51–200 cp | Aceptable | Parpadeo lento |
-| >200 cp | Blunder | Parpadeo rápido |
+| 51–199 cp | Aceptable | Parpadeo lento |
+| ≥200 cp | Blunder | Parpadeo rápido |
 
 Esto implica que si se levanta una pieza cuya mejor continuación sigue siendo mucho peor que la mejor jugada disponible con otra pieza, sus destinos pueden aparecer como aceptables o blunders. Es intencionado: el tablero evalúa la calidad real de la decisión, no sólo cuál es el mejor movimiento de la pieza elegida.
 
-El modo **Blunders** utiliza la misma evaluación y el mismo umbral superior a 200 cp, pero agrupa **Bueno** y **Aceptable** como LED fijo. Así no recomienda una jugada concreta: permite escoger cualquier destino legal y sólo advierte cuando la elección cede una ventaja muy grande, pierde material decisivo o abandona un resultado forzado.
+El límite de blunder es configurable entre 100 y 500 cp; 200 cp conserva el valor predeterminado histórico. El modo **Blunders** utiliza la misma evaluación, pero agrupa **Bueno** y **Aceptable** como LED fijo. Así no recomienda una jugada concreta: permite escoger cualquier destino legal y sólo advierte cuando la elección alcanza el umbral, pierde material decisivo o abandona un resultado forzado.
 
-Las posiciones con mate forzado o resultado de tablebase se sitúan fuera de la escala normal de centipeones para que perder una victoria forzada se considere un deterioro decisivo.
+Los mates y resultados de tablebase se comparan por su categoría semántica —victoria forzada, evaluación normal o derrota forzada— sin convertirlos en centipeones artificiales. Perder una victoria forzada o permitir una derrota forzada se considera un deterioro decisivo.
 
 ## Latencia y concurrencia
 
@@ -259,7 +261,9 @@ CI:
 - restaura/cachea las redes NNUE verificadas;
 - compila la aplicación para iOS Simulator incluyendo el motor C++;
 - ejecuta todos los tests del núcleo OTB;
-- comprueba los umbrales 50/200 cp y su mapeo a fijo/lento/rápido;
+- comprueba umbrales configurables, igualdad inclusiva y su mapeo a fijo/lento/rápido;
+- comprueba cupos 1, 3 y sin límite, repetición de piezas, reinicio por jugada completa y movimientos con piezas sin ayuda;
+- comprueba cambios de signo, perspectiva de negras y transiciones entre centipeones y mate;
 - comprueba que Blunders convierte bueno y aceptable en fijo y conserva únicamente el blunder como parpadeo rápido;
 - verifica que Calidad Stockfish no utiliza pistas simuladas como fallback;
 - verifica las directivas de ciclo `active` / `inactive` / `background`;

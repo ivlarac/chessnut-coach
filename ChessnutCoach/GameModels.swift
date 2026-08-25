@@ -206,6 +206,8 @@ struct NewGameDraft: Equatable, Sendable {
     var humanAssistance: AssistanceMode
     var whiteAssistance: AssistanceMode
     var blackAssistance: AssistanceMode
+    var maximumAssistancePieces: AssistancePieceLimit
+    var blunderThreshold: BlunderThreshold
     var allowUndo = false
     var automaticBoardRotation = false
 
@@ -213,7 +215,9 @@ struct NewGameDraft: Equatable, Sendable {
         whitePlayerName: String,
         blackPlayerName: String,
         whiteAssistance: AssistanceMode,
-        blackAssistance: AssistanceMode
+        blackAssistance: AssistanceMode,
+        maximumAssistancePieces: AssistancePieceLimit = .unlimited,
+        blunderThreshold: BlunderThreshold = .twoHundred
     ) {
         self.whitePlayerName = Self.editableName(whitePlayerName, fallback: "Blancas")
         self.blackPlayerName = Self.editableName(blackPlayerName, fallback: "Negras")
@@ -227,6 +231,8 @@ struct NewGameDraft: Equatable, Sendable {
             : whiteAssistance
         self.whiteAssistance = whiteAssistance
         self.blackAssistance = blackAssistance
+        self.maximumAssistancePieces = maximumAssistancePieces
+        self.blunderThreshold = blunderThreshold
     }
 
     var canStart: Bool {
@@ -249,11 +255,15 @@ struct NewGameDraft: Equatable, Sendable {
         let assistance = mode == .solo
             ? AssistanceSettings(
                 white: humanSide == .white ? humanAssistance : .off,
-                black: humanSide == .black ? humanAssistance : .off
+                black: humanSide == .black ? humanAssistance : .off,
+                maximumPiecesPerTurn: maximumAssistancePieces,
+                blunderThreshold: blunderThreshold
             )
             : AssistanceSettings(
                 white: whiteAssistance,
-                black: blackAssistance
+                black: blackAssistance,
+                maximumPiecesPerTurn: maximumAssistancePieces,
+                blunderThreshold: blunderThreshold
             )
         let humanName = Self.trimmed(humanPlayerName)
         let opponent = opponentEngineConfiguration
@@ -647,20 +657,122 @@ enum AssistanceMode: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
+enum AssistancePieceLimit: Int, CaseIterable, Identifiable, Codable, Sendable {
+    case unlimited = 0
+    case one = 1
+    case two = 2
+    case three = 3
+    case four = 4
+    case five = 5
+
+    var id: Int { rawValue }
+    var maximumCount: Int? { self == .unlimited ? nil : rawValue }
+
+    var displayText: String {
+        switch self {
+        case .unlimited: "Sin límite"
+        case .one: "1 pieza"
+        case .two: "2 piezas"
+        case .three: "3 piezas"
+        case .four: "4 piezas"
+        case .five: "5 piezas"
+        }
+    }
+}
+
+enum BlunderThreshold: Int, CaseIterable, Identifiable, Codable, Sendable {
+    case oneHundred = 100
+    case oneHundredFifty = 150
+    case twoHundred = 200
+    case twoHundredFifty = 250
+    case threeHundred = 300
+    case fourHundred = 400
+    case fiveHundred = 500
+
+    var id: Int { rawValue }
+    var displayText: String { "\(rawValue) cp" }
+}
+
 struct AssistanceSettings: Equatable, Codable, Sendable {
     var white: AssistanceMode
     var black: AssistanceMode
+    var maximumPiecesPerTurn: AssistancePieceLimit
+    var blunderThreshold: BlunderThreshold
 
     init(
         white: AssistanceMode = .stockfishQuality,
-        black: AssistanceMode = .off
+        black: AssistanceMode = .off,
+        maximumPiecesPerTurn: AssistancePieceLimit = .unlimited,
+        blunderThreshold: BlunderThreshold = .twoHundred
     ) {
         self.white = white
         self.black = black
+        self.maximumPiecesPerTurn = maximumPiecesPerTurn
+        self.blunderThreshold = blunderThreshold
     }
 
     func mode(for color: Piece.Color) -> AssistanceMode {
         color == .white ? white : black
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case white
+        case black
+        case maximumPiecesPerTurn
+        case blunderThreshold
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        white = try container.decodeIfPresent(AssistanceMode.self, forKey: .white) ?? .stockfishQuality
+        black = try container.decodeIfPresent(AssistanceMode.self, forKey: .black) ?? .off
+        maximumPiecesPerTurn = try container.decodeIfPresent(
+            AssistancePieceLimit.self,
+            forKey: .maximumPiecesPerTurn
+        ) ?? .unlimited
+        blunderThreshold = try container.decodeIfPresent(
+            BlunderThreshold.self,
+            forKey: .blunderThreshold
+        ) ?? .twoHundred
+    }
+}
+
+/// Domain state for the current turn. A source square identifies the concrete
+/// piece in the logical position for that turn, so equal piece kinds on b1 and
+/// g1 remain separate consultations.
+struct TurnAssistanceAccessPolicy: Equatable, Sendable {
+    private(set) var consultedSources: Set<Square> = []
+    var limit: AssistancePieceLimit
+
+    init(limit: AssistancePieceLimit = .unlimited) {
+        self.limit = limit
+    }
+
+    mutating func requestAssistance(for source: Square) -> Bool {
+        if consultedSources.contains(source) {
+            return true
+        }
+
+        if let maximumCount = limit.maximumCount,
+           consultedSources.count >= maximumCount {
+            return false
+        }
+
+        consultedSources.insert(source)
+        return true
+    }
+
+    mutating func resetForNextTurn() {
+        consultedSources.removeAll(keepingCapacity: true)
+    }
+
+    mutating func handle(_ event: OTBGameEvent) {
+        switch event {
+        case .moveCompleted, .moveUndone:
+            resetForNextTurn()
+        case .synchronized, .pieceLifted, .promotionRequired, .intermediate, .invalid:
+            break
+        }
     }
 }
 
@@ -711,19 +823,31 @@ enum MoveQuality: String, CaseIterable, Codable, Sendable {
     }
 }
 
+enum MoveEvaluationLoss: Equatable, Sendable {
+    case centipawns(Int)
+    case decisive
+}
+
 struct MoveQualityThresholds: Equatable, Sendable {
     var goodMaxCentipawnLoss: Int = 50
-    var acceptableMaxCentipawnLoss: Int = 200
+    var blunderThreshold: BlunderThreshold = .twoHundred
 
     func classify(loss: Int) -> MoveQuality {
         let normalizedLoss = max(0, loss)
         if normalizedLoss <= goodMaxCentipawnLoss {
             return .good
         }
-        if normalizedLoss <= acceptableMaxCentipawnLoss {
+        if normalizedLoss < blunderThreshold.rawValue {
             return .acceptable
         }
         return .blunder
+    }
+
+    func classify(loss: MoveEvaluationLoss) -> MoveQuality {
+        switch loss {
+        case let .centipawns(value): classify(loss: value)
+        case .decisive: .blunder
+        }
     }
 }
 

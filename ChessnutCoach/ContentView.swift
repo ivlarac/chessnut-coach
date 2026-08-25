@@ -63,7 +63,7 @@ private struct AppInformationView: View {
                     )
                     informationRow(
                         title: "Ayuda por LEDs",
-                        description: "Movimientos legales, calidad de jugadas y aviso de blunders configurable por bando cuando el tablero dispone de LEDs.",
+                        description: "Movimientos legales, calidad y blunders configurables por bando, con límite opcional de piezas consultadas por turno.",
                         systemImage: "lightbulb.max.fill"
                     )
                     informationRow(

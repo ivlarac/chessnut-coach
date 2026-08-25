@@ -81,6 +81,8 @@ final class BoardController: ObservableObject {
 
     var whiteAssistanceMode: AssistanceMode { assistanceSettings.white }
     var blackAssistanceMode: AssistanceMode { assistanceSettings.black }
+    var maximumAssistancePieces: AssistancePieceLimit { assistanceSettings.maximumPiecesPerTurn }
+    var blunderThreshold: BlunderThreshold { assistanceSettings.blunderThreshold }
     var currentGameID: UUID { gameSession.gameRecord.id }
     var supportedBoards: [ElectronicBoardSupport] { adapterRegistry.supportedBoards }
     var boardDisplayName: String { connectedBoard?.name ?? selectedBoard?.name ?? "Tablero electrónico" }
@@ -105,6 +107,7 @@ final class BoardController: ObservableObject {
     private var discoveryTask: Task<Void, Never>?
     private var discoveryTimeoutTask: Task<Void, Never>?
     private let lastBoardPreferenceKey = "LastElectronicChessBoardID"
+    private static let assistanceSettingsPreferenceKey = "AssistanceSettings"
     private var connectionTask: Task<Void, Never>?
     private var reconnectionTask: Task<Void, Never>?
     private var disconnectionTask: Task<Void, Never>?
@@ -118,6 +121,7 @@ final class BoardController: ObservableObject {
     private var currentOpponentEngine: (any ChessPlayingEngine)?
     private var gameSession = OTBGameSession()
     private let stockfishCoach = StockfishMoveCoach()
+    private var turnAssistancePolicy = TurnAssistanceAccessPolicy()
     private let opponentEngineBuilder: @Sendable (OpponentEngineConfiguration) throws -> any ChessPlayingEngine
     private weak var gameLibrary: GameLibrary?
 
@@ -166,6 +170,11 @@ final class BoardController: ObservableObject {
         self.adapterRegistry = adapterRegistry
         self.preferences = preferences
         self.opponentEngineBuilder = opponentEngineBuilder
+
+        if let savedSettings = Self.loadAssistanceSettings(from: preferences) {
+            assistanceSettings = savedSettings
+        }
+        turnAssistancePolicy.limit = assistanceSettings.maximumPiecesPerTurn
 
         if let savedGame = library?.resumableGame,
            let restoredSession = try? OTBGameSession(restoring: savedGame) {
@@ -415,6 +424,10 @@ final class BoardController: ObservableObject {
         cancelEngineMoveRequest(clearSuggestion: true)
         screenPromotionRequest = nil
         assistanceSettings = configuration.assistance
+        turnAssistancePolicy = TurnAssistanceAccessPolicy(
+            limit: configuration.assistance.maximumPiecesPerTurn
+        )
+        persistAssistanceSettings()
 
         let opponentConfiguration = configuration.opponentEngine
         let engineName = opponentConfiguration.displayName
@@ -473,6 +486,7 @@ final class BoardController: ObservableObject {
 
     func setWhiteAssistanceMode(_ mode: AssistanceMode) {
         assistanceSettings.white = mode
+        persistAssistanceSettings()
         refreshCurrentAssistanceIfNeeded()
         if !isConnected {
             refreshScreenAssistanceIfNeeded()
@@ -482,6 +496,27 @@ final class BoardController: ObservableObject {
 
     func setBlackAssistanceMode(_ mode: AssistanceMode) {
         assistanceSettings.black = mode
+        persistAssistanceSettings()
+        refreshCurrentAssistanceIfNeeded()
+        if !isConnected {
+            refreshScreenAssistanceIfNeeded()
+        }
+        scheduleStockfishPrewarmIfNeeded()
+    }
+
+    func setMaximumAssistancePieces(_ limit: AssistancePieceLimit) {
+        assistanceSettings.maximumPiecesPerTurn = limit
+        turnAssistancePolicy.limit = limit
+        persistAssistanceSettings()
+        refreshCurrentAssistanceIfNeeded()
+        if !isConnected {
+            refreshScreenAssistanceIfNeeded()
+        }
+    }
+
+    func setBlunderThreshold(_ threshold: BlunderThreshold) {
+        assistanceSettings.blunderThreshold = threshold
+        persistAssistanceSettings()
         refreshCurrentAssistanceIfNeeded()
         if !isConnected {
             refreshScreenAssistanceIfNeeded()
@@ -511,6 +546,7 @@ final class BoardController: ObservableObject {
         invalidateTransientAssistance(turnOffLEDs: isConnected)
         cancelEngineMoveRequest(clearSuggestion: true)
         screenPromotionRequest = nil
+        resetTurnAssistancePolicy()
         publishGameState()
         persistAfterUndo()
 
@@ -861,6 +897,8 @@ final class BoardController: ObservableObject {
         if case .moveCompleted = event, wasEngineTurn {
             cancelEngineMoveRequest(clearSuggestion: true)
         }
+        turnAssistancePolicy.limit = assistanceSettings.maximumPiecesPerTurn
+        turnAssistancePolicy.handle(event)
         publishGameState()
         switch event {
         case .moveCompleted:
@@ -919,6 +957,18 @@ final class BoardController: ObservableObject {
                     try await client.setLEDs(.allOff)
                 } else {
                     let mode = assistanceSettings.mode(for: gameSession.sideToMove)
+
+                    guard canProvideAssistance(
+                        for: source,
+                        legalTargets: legalTargets,
+                        mode: mode
+                    ) else {
+                        showAssistanceLimitReached(for: source)
+                        if client.capabilities.contains(.leds) {
+                            try await client.setLEDs(.allOff)
+                        }
+                        break
+                    }
 
                     switch mode {
                     case .off:
@@ -982,6 +1032,20 @@ final class BoardController: ObservableObject {
                 } else if !gameSession.legalTargets.isEmpty {
                     let mode = assistanceSettings.mode(for: gameSession.sideToMove)
 
+                    guard let source = gameSession.liftedSquare,
+                          canProvideAssistance(
+                              for: source,
+                              legalTargets: gameSession.legalTargets,
+                              mode: mode
+                          )
+                    else {
+                        if let source = gameSession.liftedSquare, mode != .off {
+                            showAssistanceLimitReached(for: source)
+                        }
+                        try await client.setLEDs(.allOff)
+                        break
+                    }
+
                     switch mode {
                     case .off:
                         try await client.setLEDs(.allOff)
@@ -1035,6 +1099,24 @@ final class BoardController: ObservableObject {
         invalidateTransientAssistance(turnOffLEDs: false)
 
         let mode = assistanceSettings.mode(for: gameSession.sideToMove)
+        guard canProvideAssistance(
+            for: source,
+            legalTargets: gameSession.legalTargets,
+            mode: mode
+        ) else {
+            showAssistanceLimitReached(for: source)
+            if client.capabilities.contains(.leds) {
+                Task { [weak self] in
+                    do {
+                        try await client.setLEDs(.allOff)
+                    } catch {
+                        self?.handleClientFailure(error, client: client)
+                    }
+                }
+            }
+            return
+        }
+
         switch mode {
         case .off:
             screenHints = []
@@ -1094,13 +1176,17 @@ final class BoardController: ObservableObject {
         let fen = logicalFEN
         let coach = stockfishCoach
         let generation = assistanceGeneration
+        let thresholds = MoveQualityThresholds(
+            blunderThreshold: assistanceSettings.blunderThreshold
+        )
 
         coachingTask = Task { [weak self] in
             do {
                 let result = try await coach.evaluate(
                     fen: fen,
                     source: source,
-                    legalTargets: legalTargets
+                    legalTargets: legalTargets,
+                    thresholds: thresholds
                 )
                 try Task.checkCancellation()
                 guard let self else { return }
@@ -1305,14 +1391,37 @@ final class BoardController: ObservableObject {
     }
 
     private func stockfishCoachingStatus(for mode: AssistanceMode) -> String {
-        switch mode {
+        let threshold = assistanceSettings.blunderThreshold.rawValue
+        return switch mode {
         case .stockfishQuality:
-            "Stockfish 18: fijo = bueno (≤50 cp), lento = aceptable (≤200 cp), rápido = blunder."
+            "Stockfish 18: fijo = bueno (≤50 cp), lento = aceptable, rápido = blunder (≥\(threshold) cp)."
         case .blunders:
-            "Stockfish 18: destinos legales fijos; blunders (>200 cp) parpadean rápido."
+            "Stockfish 18: destinos legales fijos; blunders (≥\(threshold) cp) parpadean rápido."
         case .off, .legalMoves:
             ""
         }
+    }
+
+    private func canProvideAssistance(
+        for source: Square,
+        legalTargets: [Square],
+        mode: AssistanceMode
+    ) -> Bool {
+        guard mode != .off, !legalTargets.isEmpty else { return true }
+        turnAssistancePolicy.limit = assistanceSettings.maximumPiecesPerTurn
+        return turnAssistancePolicy.requestAssistance(for: source)
+    }
+
+    private func showAssistanceLimitReached(for source: Square) {
+        clearStockfishHints()
+        screenHints = []
+        activeHintSummary = ""
+        gameStatus = "\(source.notation) supera el máximo de piezas con ayuda de este turno. Puedes moverla normalmente."
+    }
+
+    private func resetTurnAssistancePolicy() {
+        turnAssistancePolicy.limit = assistanceSettings.maximumPiecesPerTurn
+        turnAssistancePolicy.resetForNextTurn()
     }
 
     private func clearStockfishHints() {
@@ -1430,6 +1539,16 @@ final class BoardController: ObservableObject {
         gameLibrary?.upsert(gameSession.gameRecord)
     }
 
+    private func persistAssistanceSettings() {
+        guard let data = try? JSONEncoder().encode(assistanceSettings) else { return }
+        preferences.set(data, forKey: Self.assistanceSettingsPreferenceKey)
+    }
+
+    private static func loadAssistanceSettings(from preferences: UserDefaults) -> AssistanceSettings? {
+        guard let data = preferences.data(forKey: assistanceSettingsPreferenceKey) else { return nil }
+        return try? JSONDecoder().decode(AssistanceSettings.self, from: data)
+    }
+
     private func persistAfterUndo() {
         guard hasActiveGame else { return }
         if gameSession.gameRecord.mode == .twoPlayer && gameSession.moves.isEmpty {
@@ -1443,6 +1562,7 @@ final class BoardController: ObservableObject {
         invalidateTransientAssistance(turnOffLEDs: isConnected)
         cancelEngineMoveRequest(clearSuggestion: true)
         screenPromotionRequest = nil
+        resetTurnAssistancePolicy()
 
         let idleWhite = normalizedNonEnginePlayerName(whitePlayerName, fallback: "Blancas")
         let idleBlack = normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
@@ -1686,6 +1806,11 @@ extension BoardController {
         let targets = legalTargets.map(Square.init)
         let mode = assistanceSettings.mode(for: gameSession.sideToMove)
 
+        guard canProvideAssistance(for: source, legalTargets: targets, mode: mode) else {
+            showAssistanceLimitReached(for: source)
+            return
+        }
+
         switch mode {
         case .off:
             gameStatus = "Pieza seleccionada en \(source.notation). Ayuda desactivada para \(sideToMoveLabel.lowercased())."
@@ -1718,13 +1843,17 @@ extension BoardController {
         let fen = logicalFEN
         let coach = stockfishCoach
         let generation = assistanceGeneration
+        let thresholds = MoveQualityThresholds(
+            blunderThreshold: assistanceSettings.blunderThreshold
+        )
 
         coachingTask = Task { [weak self] in
             do {
                 let result = try await coach.evaluate(
                     fen: fen,
                     source: source,
-                    legalTargets: legalTargets
+                    legalTargets: legalTargets,
+                    thresholds: thresholds
                 )
                 try Task.checkCancellation()
                 guard let self else { return }
@@ -1797,6 +1926,9 @@ extension BoardController {
             physicalPlacement: candidate.position.fen,
             requiredMove: requiredMove
         )
+
+        turnAssistancePolicy.limit = assistanceSettings.maximumPiecesPerTurn
+        turnAssistancePolicy.handle(event)
 
         publishGameState()
 
