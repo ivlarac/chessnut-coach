@@ -1360,7 +1360,7 @@ final class BoardController: ObservableObject {
 
     private func stockfishCoachingStatus(for mode: AssistanceMode) -> String {
         let threshold = assistanceSettings.blunderThreshold.rawValue
-        switch mode {
+        return switch mode {
         case .stockfishQuality:
             "Stockfish 18: fijo = bueno (≤50 cp), lento = aceptable, rápido = blunder (≥\(threshold) cp)."
         case .blunders:
