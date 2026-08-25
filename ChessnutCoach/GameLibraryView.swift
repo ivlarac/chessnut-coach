@@ -217,6 +217,10 @@ struct GameDetailView: View {
                     }
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
 
+                    if let stamp = selectedClockStamp {
+                        AnalysisClockSummaryView(stamp: stamp)
+                    }
+
                     LabeledContent("Evaluación") {
                         if analysis.isAnalyzing {
                             ProgressView()
@@ -608,6 +612,11 @@ struct GameDetailView: View {
         return "Variante · \(workspace.path(to: nodeID).count) jugadas"
     }
 
+    private var selectedClockStamp: GameMoveClockStamp? {
+        guard let ply = workspace.currentMainlinePly else { return nil }
+        return game.clockStamp(afterPly: ply)
+    }
+
     private var modeSymbol: String {
         switch workspace.mode {
         case .original: "book.closed"
@@ -701,9 +710,20 @@ private struct GameMoveRow: View {
             Button {
                 selectMove(move.ply)
             } label: {
-                Text(move.san)
-                    .font(.body.monospaced())
-                    .foregroundColor(selectedPly == move.ply ? .accentColor : .primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(move.san)
+                        .font(.body.monospaced())
+                        .foregroundColor(selectedPly == move.ply ? .accentColor : .primary)
+
+                    if let remaining = move.moverClockRemaining {
+                        Label(
+                            GameClockFormatter.string(for: remaining),
+                            systemImage: "clock"
+                        )
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    }
+                }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -712,6 +732,37 @@ private struct GameMoveRow: View {
             Text("")
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+private struct AnalysisClockSummaryView: View {
+    let stamp: GameMoveClockStamp
+
+    var body: some View {
+        HStack(spacing: 10) {
+            clock(side: .white, remaining: stamp.whiteRemaining)
+            clock(side: .black, remaining: stamp.blackRemaining)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Relojes de la posición. Blancas, \(GameClockFormatter.string(for: stamp.whiteRemaining)). Negras, \(GameClockFormatter.string(for: stamp.blackRemaining))."
+        )
+    }
+
+    private func clock(side: PlayerSide, remaining: TimeInterval) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(side.displayText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(GameClockFormatter.string(for: remaining))
+                .font(.system(.title3, design: .monospaced).weight(.semibold))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .tertiarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

@@ -152,6 +152,18 @@ struct GameClockSnapshot: Equatable, Codable, Sendable {
     let pauseReason: GameClockPauseReason?
 }
 
+/// Materialized clock values immediately after a completed move. Unlike the
+/// live clock state, this value never depends on `Date()` and is safe to show
+/// later while replaying or analysing the game.
+struct GameMoveClockStamp: Equatable, Codable, Sendable {
+    let whiteRemaining: TimeInterval
+    let blackRemaining: TimeInterval
+
+    func remaining(for side: PlayerSide) -> TimeInterval {
+        max(0, side == .white ? whiteRemaining : blackRemaining)
+    }
+}
+
 struct GameClockState: Equatable, Codable, Sendable {
     let timeControl: GameTimeControl
     private(set) var whiteRemaining: TimeInterval
@@ -280,5 +292,54 @@ enum GameClockFormatter {
 
         let totalSeconds = Int(remaining.rounded(.up))
         return String(format: "%02d:%02d", totalSeconds / 60, totalSeconds % 60)
+    }
+}
+
+/// Adds a short, cancellable presentation delay when a playing engine finds a
+/// move faster than a human would reasonably respond. The engine's real search
+/// time counts towards this target, and the target shrinks automatically in
+/// time trouble so the artificial delay cannot consume the remaining clock.
+enum EngineMovePacing {
+    static func targetResponseTime(
+        timeControl: GameTimeControl,
+        remaining: TimeInterval?,
+        completedMoveCount: Int
+    ) -> TimeInterval {
+        let openingFactor = completedMoveCount < 6 ? 0.75 : 1.0
+        let nominal: TimeInterval
+
+        switch timeControl {
+        case .unlimited:
+            nominal = 0.8
+        case let .fischer(initialSeconds, incrementSeconds):
+            nominal = min(
+                4.0,
+                max(
+                    0.4,
+                    (Double(initialSeconds) / 240.0)
+                        + (Double(incrementSeconds) * 0.1)
+                )
+            )
+        }
+
+        let phased = nominal * openingFactor
+        guard let remaining else { return phased }
+        return min(phased, max(0, remaining * 0.15))
+    }
+
+    static func additionalDelay(
+        timeControl: GameTimeControl,
+        remaining: TimeInterval?,
+        completedMoveCount: Int,
+        computationDuration: TimeInterval
+    ) -> TimeInterval {
+        max(
+            0,
+            targetResponseTime(
+                timeControl: timeControl,
+                remaining: remaining,
+                completedMoveCount: completedMoveCount
+            ) - max(0, computationDuration)
+        )
     }
 }

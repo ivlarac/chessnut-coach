@@ -542,6 +542,20 @@ struct OTBGameSession: Sendable {
         playedAt: Date
     ) -> OTBGameEvent {
         let detected = OTBDetectedMove(from: move.start, to: move.end, san: move.san)
+        var clockAfterMove: GameMoveClockStamp?
+        if var clock = gameRecord.clockState,
+           let position = Position(fen: fenBefore) {
+            _ = clock.completeMove(
+                by: Self.playerSide(for: position.sideToMove),
+                at: playedAt
+            )
+            clockAfterMove = GameMoveClockStamp(
+                whiteRemaining: clock.remaining(for: .white, at: playedAt),
+                blackRemaining: clock.remaining(for: .black, at: playedAt)
+            )
+            gameRecord.clockState = clock
+        }
+
         let record = GameMoveRecord(
             ply: gameRecord.moves.count + 1,
             san: move.san,
@@ -552,18 +566,11 @@ struct OTBGameSession: Sendable {
             fenAfter: board.position.fen,
             playedAt: playedAt,
             promotion: move.promotedPiece?.kind.promotionSymbol,
-            participant: participant(forFEN: fenBefore)
+            participant: participant(forFEN: fenBefore),
+            clockAfterMove: clockAfterMove
         )
 
         gameRecord.moves.append(record)
-        if var clock = gameRecord.clockState,
-           let position = Position(fen: fenBefore) {
-            _ = clock.completeMove(
-                by: Self.playerSide(for: position.sideToMove),
-                at: playedAt
-            )
-            gameRecord.clockState = clock
-        }
         liftedSquare = nil
         legalTargets = []
         lastMove = detected

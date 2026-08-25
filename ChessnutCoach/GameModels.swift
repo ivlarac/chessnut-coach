@@ -464,6 +464,7 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
     let playedAt: Date
     let promotion: String?
     let participant: MoveParticipant?
+    let clockAfterMove: GameMoveClockStamp?
 
     init(
         id: UUID = UUID(),
@@ -476,7 +477,8 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
         fenAfter: String,
         playedAt: Date = Date(),
         promotion: String? = nil,
-        participant: MoveParticipant? = nil
+        participant: MoveParticipant? = nil,
+        clockAfterMove: GameMoveClockStamp? = nil
     ) {
         self.id = id
         self.ply = ply
@@ -489,6 +491,16 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
         self.playedAt = playedAt
         self.promotion = promotion
         self.participant = participant
+        self.clockAfterMove = clockAfterMove
+    }
+
+    var moverSide: PlayerSide {
+        let fields = fenBefore.split(separator: " ")
+        return fields.count > 1 && fields[1] == "b" ? .black : .white
+    }
+
+    var moverClockRemaining: TimeInterval? {
+        clockAfterMove?.remaining(for: moverSide)
     }
 }
 
@@ -567,6 +579,18 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
 
     var duration: TimeInterval {
         max(0, lastActivityAt.timeIntervalSince(startedAt))
+    }
+
+    func clockStamp(afterPly ply: Int) -> GameMoveClockStamp? {
+        guard timeControl.isTimed else { return nil }
+        if ply <= 0 {
+            let initial = TimeInterval(timeControl.initialSeconds ?? 0)
+            return GameMoveClockStamp(
+                whiteRemaining: initial,
+                blackRemaining: initial
+            )
+        }
+        return moves.first(where: { $0.ply == min(ply, moves.count) })?.clockAfterMove
     }
 
     private enum CodingKeys: String, CodingKey {

@@ -132,6 +132,7 @@ final class BoardController: ObservableObject {
     private var turnAssistancePolicy = TurnAssistanceAccessPolicy()
     private let opponentEngineBuilder: @Sendable (OpponentEngineConfiguration) throws -> any ChessPlayingEngine
     private let nowProvider: () -> Date
+    private let engineDelaySleeper: @Sendable (Duration) async throws -> Void
     private weak var gameLibrary: GameLibrary?
     private var clockRefreshCancellable: AnyCancellable?
 
@@ -168,6 +169,9 @@ final class BoardController: ObservableObject {
         adapterRegistry: ElectronicBoardAdapterRegistry = .appDefault,
         preferences: UserDefaults = .standard,
         nowProvider: @escaping () -> Date = { Date() },
+        engineDelaySleeper: @escaping @Sendable (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        },
         opponentEngineBuilder: @escaping @Sendable (OpponentEngineConfiguration) throws -> any ChessPlayingEngine = {
             configuration in
             switch configuration.kind {
@@ -181,6 +185,7 @@ final class BoardController: ObservableObject {
         self.adapterRegistry = adapterRegistry
         self.preferences = preferences
         self.nowProvider = nowProvider
+        self.engineDelaySleeper = engineDelaySleeper
         self.opponentEngineBuilder = opponentEngineBuilder
 
         if let savedSettings = Self.loadAssistanceSettings(from: preferences) {
@@ -1363,6 +1368,7 @@ final class BoardController: ObservableObject {
         }
         isEngineThinking = true
         gameStatus = "\(opponentDisplayName) está calculando su jugada (\(configuration.strengthDisplayText))…"
+        let searchStartedAt = nowProvider()
 
         engineMoveTask = Task { [weak self] in
             guard let self else { return }
@@ -1386,6 +1392,13 @@ final class BoardController: ObservableObject {
                     uci: response.uci,
                     fen: fen
                 )
+                try Task.checkCancellation()
+                guard self.engineMoveGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.isEngineTurn
+                else { return }
+
+                try await self.waitForEnginePacing(searchStartedAt: searchStartedAt)
                 try Task.checkCancellation()
                 guard self.engineMoveGeneration == generation,
                       self.logicalFEN == fen,
@@ -1426,6 +1439,22 @@ final class BoardController: ObservableObject {
             ],
             client: client
         )
+    }
+
+    private func waitForEnginePacing(searchStartedAt: Date) async throws {
+        let measuredAt = nowProvider()
+        let engineSide: PlayerSide = gameSession.sideToMove == .white ? .white : .black
+        let remaining = gameSession.clockRemaining(for: engineSide, at: measuredAt)
+        let delay = EngineMovePacing.additionalDelay(
+            timeControl: gameSession.timeControl,
+            remaining: remaining,
+            completedMoveCount: gameSession.moves.count,
+            computationDuration: measuredAt.timeIntervalSince(searchStartedAt)
+        )
+
+        guard delay >= 0.01 else { return }
+        let milliseconds = Int64((delay * 1_000).rounded())
+        try await engineDelaySleeper(.milliseconds(milliseconds))
     }
 
     private func cancelEngineMoveRequest(clearSuggestion: Bool) {
@@ -2128,6 +2157,7 @@ extension BoardController {
         }
         isEngineThinking = true
         gameStatus = "\(opponentDisplayName) está calculando su jugada (\(configuration.strengthDisplayText))…"
+        let searchStartedAt = nowProvider()
 
         engineMoveTask = Task { [weak self] in
             guard let self else { return }
@@ -2151,6 +2181,14 @@ extension BoardController {
                     uci: response.uci,
                     fen: fen
                 )
+                try Task.checkCancellation()
+                guard !self.isConnected,
+                      self.engineMoveGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.isEngineTurn
+                else { return }
+
+                try await self.waitForEnginePacing(searchStartedAt: searchStartedAt)
                 try Task.checkCancellation()
                 guard !self.isConnected,
                       self.engineMoveGeneration == generation,

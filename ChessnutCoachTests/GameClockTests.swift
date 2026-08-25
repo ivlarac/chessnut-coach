@@ -82,6 +82,105 @@ final class GameClockTests: XCTestCase {
         XCTAssertEqual(clock.activeSide, .black)
     }
 
+    func testCompletedMovePersistsMaterializedClockStampForAnalysis() throws {
+        var session = timedSession()
+        session.startClockIfNeeded(at: start)
+        var physical = Board()
+        _ = try XCTUnwrap(physical.move(pieceAt: .e2, to: .e4))
+
+        _ = session.process(
+            physicalPlacement: placement(physical.position.fen),
+            at: start.addingTimeInterval(4)
+        )
+
+        let move = try XCTUnwrap(session.moves.first)
+        XCTAssertEqual(move.moverSide, .white)
+        XCTAssertEqual(move.moverClockRemaining!, 299, accuracy: 0.001)
+        XCTAssertEqual(move.clockAfterMove?.whiteRemaining, 299)
+        XCTAssertEqual(move.clockAfterMove?.blackRemaining, 300)
+        XCTAssertEqual(session.gameRecord.clockStamp(afterPly: 0)?.whiteRemaining, 300)
+        XCTAssertEqual(session.gameRecord.clockStamp(afterPly: 1), move.clockAfterMove)
+    }
+
+    func testLegacyMoveWithoutClockStampStillDecodes() throws {
+        let legacyMove = GameMoveRecord(
+            ply: 1,
+            san: "e4",
+            lan: "e2e4",
+            from: "e2",
+            to: "e4",
+            fenBefore: Position.standard.fen,
+            fenAfter: Position.standard.fen
+        )
+
+        let decoded = try JSONDecoder().decode(
+            GameMoveRecord.self,
+            from: JSONEncoder().encode(legacyMove)
+        )
+
+        XCTAssertNil(decoded.clockAfterMove)
+        XCTAssertNil(decoded.moverClockRemaining)
+    }
+
+    func testEnginePacingSubtractsRealCalculationAndShrinksInTimeTrouble() {
+        let control = GameTimeControl.fischer(initialSeconds: 300, incrementSeconds: 3)
+        let normal = EngineMovePacing.targetResponseTime(
+            timeControl: control,
+            remaining: 290,
+            completedMoveCount: 10
+        )
+        let low = EngineMovePacing.targetResponseTime(
+            timeControl: control,
+            remaining: 1,
+            completedMoveCount: 10
+        )
+        let additional = EngineMovePacing.additionalDelay(
+            timeControl: control,
+            remaining: 290,
+            completedMoveCount: 10,
+            computationDuration: normal + 0.1
+        )
+
+        XCTAssertGreaterThan(normal, 1)
+        XCTAssertLessThan(low, normal)
+        XCTAssertEqual(additional, 0, accuracy: 0.001)
+    }
+
+#if !SWIFT_PACKAGE
+    @MainActor
+    func testVirtualEngineMoveUsesConfiguredPacingDelay() async {
+        let engine = ImmediateClockPlayingEngine()
+        let recorder = EngineDelayRecorder()
+        let controller = BoardController(
+            library: GameLibrary(inMemory: true),
+            nowProvider: { self.start },
+            engineDelaySleeper: { duration in
+                await recorder.record(duration)
+            },
+            opponentEngineBuilder: { _ in engine }
+        )
+        controller.newGame(
+            configuration: NewGameConfiguration(
+                mode: .solo,
+                humanSide: .white,
+                opponentEngine: .stockfish(StockfishStrength(level: 4)),
+                assistance: AssistanceSettings(white: .off, black: .off),
+                timeControl: .fischer(initialSeconds: 300, incrementSeconds: 3)
+            )
+        )
+
+        controller.handleScreenMove(from: "e2", to: "e4")
+        for _ in 0..<200 where controller.moveCount < 2 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(controller.moveCount, 2)
+        let delays = await recorder.durations
+        XCTAssertEqual(delays.count, 1)
+        XCTAssertGreaterThan(delays[0], .milliseconds(500))
+    }
+#endif
+
     func testCompletedOTBMoveAppliesIncrementAndChangesClock() throws {
         var session = timedSession()
         session.startClockIfNeeded(at: start)
@@ -334,3 +433,23 @@ final class GameClockTests: XCTestCase {
         return move
     }
 }
+
+#if !SWIFT_PACKAGE
+private actor EngineDelayRecorder {
+    private(set) var durations: [Duration] = []
+
+    func record(_ duration: Duration) {
+        durations.append(duration)
+    }
+}
+
+private actor ImmediateClockPlayingEngine: ChessPlayingEngine {
+    nonisolated let kind = OpponentEngineKind.stockfish18
+
+    func move(for request: ChessPlayingRequest) async throws -> ChessPlayingMove {
+        ChessPlayingMove(uci: "e7e5")
+    }
+
+    func cancel() async {}
+}
+#endif
