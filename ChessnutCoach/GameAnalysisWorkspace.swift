@@ -148,7 +148,7 @@ final class GameAnalysisWorkspace: ObservableObject {
     }
 
     func exploreCurrentPosition() {
-        guard game.status == .finished, playConfiguration == nil else { return }
+        guard game.allowsAnalysis, playConfiguration == nil else { return }
         isExploring = true
         clearSelection()
         status = "Explorando variante · mueve una pieza legal."
@@ -255,7 +255,7 @@ final class GameAnalysisWorkspace: ObservableObject {
     }
 
     func startPlaying(_ configuration: AnalysisPlayConfiguration) {
-        guard game.status == .finished else { return }
+        guard game.allowsAnalysis else { return }
         stopEngineSearch()
         playConfiguration = configuration
         playStartFEN = currentFEN
@@ -277,6 +277,47 @@ final class GameAnalysisWorkspace: ObservableObject {
     func cancelAllWork() {
         stopEngineSearch()
         clearSelection()
+    }
+
+    /// Keeps an already presented detail screen in sync with the persisted
+    /// record. Timed games are saved while active, so the same screen can
+    /// legitimately observe the record transition from playing to archived.
+    func synchronize(with updatedGame: GameRecord) {
+        guard updatedGame.id == game.id, updatedGame != game else { return }
+
+        let wasAnalysisAvailable = game.allowsAnalysis
+        game = updatedGame
+        tree = AnalysisVariationTree(nodes: updatedGame.analysisVariations)
+
+        if !updatedGame.allowsAnalysis {
+            stopEngineSearch()
+            playConfiguration = nil
+            playStartFEN = nil
+            currentReference = .mainline(ply: updatedGame.moves.count)
+            isExploring = false
+            status = "Partida en curso · finalízala para explorar variantes."
+        } else if !wasAnalysisAvailable {
+            currentReference = .mainline(ply: 0)
+            isExploring = false
+            status = "Partida finalizada. Selecciona una posición para analizarla."
+        } else {
+            switch currentReference {
+            case let .mainline(ply):
+                currentReference = .mainline(
+                    ply: min(max(0, ply), updatedGame.moves.count)
+                )
+            case let .variation(nodeID):
+                if tree.node(id: nodeID) == nil {
+                    currentReference = .mainline(ply: 0)
+                    isExploring = false
+                }
+            }
+        }
+
+        clearSelection()
+        if updatedGame.allowsAnalysis {
+            notifyPositionChanged()
+        }
     }
 
     private func selectSource(_ notation: String) {
