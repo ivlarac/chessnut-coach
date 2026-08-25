@@ -1,6 +1,10 @@
-# Fase 9 — juego en solitario y análisis con Stockfish
+# Fase 9 — juego en solitario original con Stockfish
 
 Implementada en una PR apilada sobre las fases 7 y 8.
+
+> Documento histórico. La interfaz actual denomina este modo **Contra IA** y
+> persiste un motor rival genérico; Stockfish 18 sigue siendo la implementación
+> jugable de esta fase.
 
 ## Objetivo
 
@@ -8,10 +12,10 @@ Permitir crear una partida física de una persona contra Stockfish 18 utilizando
 
 ## Experiencia prevista
 
-1. **Nueva partida** permanece siempre visible y permite elegir entre **Contra persona** y **Contra Stockfish**.
-2. Contra Stockfish se elige el color humano: **Blancas**, **Negras** o **Aleatorio**.
+1. **Nueva partida** permanece siempre visible y permite elegir entre **Contra persona** y **Contra IA**.
+2. Con Stockfish como motor rival se elige el color humano: **Blancas**, **Negras** o **Aleatorio**.
 3. Se elige la fuerza de Stockfish mediante niveles del 1 al 20 antes de iniciar la partida.
-4. Contra Stockfish se configura únicamente la ayuda del jugador; contra una persona se mantienen ayudas independientes para ambos bandos.
+4. Contra IA se configura únicamente la ayuda del jugador; contra una persona se mantienen ayudas independientes para ambos bandos.
 5. En el turno humano, el tablero funcionará como ahora: detectará la jugada física, comprobará su legalidad y aplicará la ayuda configurada.
 6. En el turno de Stockfish, la app calculará una única jugada y mostrará claramente su origen y destino en la pantalla y mediante los LEDs del Chessnut.
 7. La persona ejecutará físicamente esa jugada por Stockfish. La app esperará hasta reconocer la posición final correcta; no avanzará el turno por una posición parcial o distinta.

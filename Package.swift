@@ -29,6 +29,8 @@ let package = Package(
                 "CurrentGameView.swift",
                 "DiagnosticsView.swift",
                 "EngineDiagnosticController.swift",
+                "Maia3CoreMLEngine.swift",
+                "Models",
                 "GameLibrary.swift",
                 "GameLibraryView.swift",
                 "Info.plist",
@@ -46,6 +48,7 @@ let package = Package(
                 "GameAnalysis.swift",
                 "GameAnalysisWorkspace.swift",
                 "GameModels.swift",
+                "OpponentEngine.swift",
                 "OTBGameSession.swift",
                 "ElectronicChessBoard.swift"
             ]

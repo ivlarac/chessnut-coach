@@ -4,7 +4,6 @@ import Foundation
 
 struct SoloEngineSuggestion: Equatable, Sendable {
     let move: OTBExpectedMove
-    let evaluation: StockfishScore
 
     var displayText: String { move.displayText }
 }
@@ -67,6 +66,7 @@ final class BoardController: ObservableObject {
     @Published private(set) var blackPlayerName = "Negras"
     @Published private(set) var gameMode = GameMode.twoPlayer
     @Published private(set) var humanSide: PlayerSide?
+    @Published private(set) var opponentEngineConfiguration: OpponentEngineConfiguration?
     @Published private(set) var engineStrength: StockfishStrength?
     @Published private(set) var engineSuggestion: SoloEngineSuggestion?
     @Published private(set) var isEngineThinking = false
@@ -89,6 +89,9 @@ final class BoardController: ObservableObject {
     var supportsLEDs: Bool { client?.capabilities.contains(.leds) ?? false }
     var supportsBattery: Bool { client?.capabilities.contains(.battery) ?? false }
     var isSoloGame: Bool { gameMode == .solo }
+    var opponentDisplayName: String {
+        opponentEngineConfiguration?.displayName ?? "Motor rival"
+    }
     var isEngineTurn: Bool {
         hasActiveGame
             && gameMode == .solo
@@ -115,9 +118,11 @@ final class BoardController: ObservableObject {
     private var coachingTask: Task<Void, Never>?
     private var prewarmTask: Task<Void, Never>?
     private var engineMoveTask: Task<Void, Never>?
+    private var currentOpponentEngine: (any ChessPlayingEngine)?
     private var gameSession = OTBGameSession()
     private let stockfishCoach = StockfishMoveCoach()
     private var turnAssistancePolicy = TurnAssistanceAccessPolicy()
+    private let opponentEngineBuilder: @Sendable (OpponentEngineConfiguration) throws -> any ChessPlayingEngine
     private weak var gameLibrary: GameLibrary?
 
     private var currentStockfishHints: [StockfishMoveHint] = []
@@ -151,12 +156,20 @@ final class BoardController: ObservableObject {
         library: GameLibrary? = nil,
         boardDiscovery: any ElectronicChessBoardDiscovery = DefaultElectronicBoardDiscovery(),
         adapterRegistry: ElectronicBoardAdapterRegistry = .appDefault,
-        preferences: UserDefaults = .standard
+        preferences: UserDefaults = .standard,
+        opponentEngineBuilder: @escaping @Sendable (OpponentEngineConfiguration) throws -> any ChessPlayingEngine = {
+            configuration in
+            switch configuration.kind {
+            case .stockfish18: StockfishOpponentEngine()
+            case .maia3: Maia3OpponentEngine(predictor: Maia3CoreMLPolicyModel.shared)
+            }
+        }
     ) {
         gameLibrary = library
         self.boardDiscovery = boardDiscovery
         self.adapterRegistry = adapterRegistry
         self.preferences = preferences
+        self.opponentEngineBuilder = opponentEngineBuilder
 
         if let savedSettings = Self.loadAssistanceSettings(from: preferences) {
             assistanceSettings = savedSettings
@@ -171,6 +184,7 @@ final class BoardController: ObservableObject {
         }
 
         publishGameState()
+        configureOpponentEngineIfNeeded()
         if hasActiveGame {
             prepareScreenTurn()
         } else {
@@ -415,7 +429,8 @@ final class BoardController: ObservableObject {
         )
         persistAssistanceSettings()
 
-        let engineName = "Stockfish 18"
+        let opponentConfiguration = configuration.opponentEngine
+        let engineName = opponentConfiguration.displayName
         let requestedWhiteName = configuration.whitePlayerName ?? whitePlayerName
         let requestedBlackName = configuration.blackPlayerName ?? blackPlayerName
         let humanName = normalizedHumanName(
@@ -442,11 +457,15 @@ final class BoardController: ObservableObject {
             blackPlayer: black,
             mode: configuration.mode,
             humanSide: configuration.mode == .solo ? configuration.humanSide : nil,
-            engineStrength: configuration.mode == .solo ? configuration.strength : nil,
+            opponentEngine: configuration.mode == .solo ? opponentConfiguration : nil,
+            engineStrength: configuration.mode == .solo
+                ? opponentConfiguration.stockfishStrength
+                : nil,
             engineName: configuration.mode == .solo ? engineName : nil,
             allowUndo: configuration.mode == .twoPlayer && configuration.allowUndo
         )
         hasActiveGame = true
+        configureOpponentEngineIfNeeded()
         lastProcessedPlacement = ""
         activeHintSummary = ""
         publishGameState()
@@ -867,7 +886,7 @@ final class BoardController: ObservableObject {
         if wasEngineTurn,
            engineSuggestion == nil,
            physicalPlacement != gameSession.logicalPlacement {
-            event = .invalid("Espera a que Stockfish proponga su jugada antes de mover sus piezas.")
+            event = .invalid("Espera a que \(opponentDisplayName) proponga su jugada antes de mover sus piezas.")
         } else {
             event = gameSession.process(
                 physicalPlacement: placement,
@@ -912,8 +931,8 @@ final class BoardController: ObservableObject {
                 } else {
                     if isEngineTurn {
                         gameStatus = engineSuggestion.map {
-                            "Turno de Stockfish: ejecuta \($0.displayText) en el tablero."
-                        } ?? "Stockfish está calculando su jugada…"
+                            "Turno de \(opponentDisplayName): ejecuta \($0.displayText) en el tablero."
+                        } ?? "\(opponentDisplayName) está calculando su jugada…"
                     } else {
                         gameStatus = lastMove == nil
                             ? "Tablero sincronizado. Levanta una pieza de las blancas para empezar."
@@ -930,7 +949,7 @@ final class BoardController: ObservableObject {
             case let .pieceLifted(source, legalTargets):
                 clearStockfishHints()
                 if wasEngineTurn, let suggestion = engineSuggestion {
-                    gameStatus = "Jugada de Stockfish: lleva \(suggestion.displayText)."
+                    gameStatus = "Jugada de \(opponentDisplayName): lleva \(suggestion.displayText)."
                     activeHintSummary = "Origen fijo · destino intermitente"
                     startEngineMoveLEDs(suggestion.move, client: client)
                 } else if legalTargets.isEmpty {
@@ -1007,7 +1026,7 @@ final class BoardController: ObservableObject {
             case let .intermediate(message):
                 gameStatus = message
                 if wasEngineTurn, let suggestion = engineSuggestion {
-                    gameStatus = "Completa la jugada de Stockfish \(suggestion.displayText)."
+                    gameStatus = "Completa la jugada de \(opponentDisplayName) \(suggestion.displayText)."
                     activeHintSummary = "Origen fijo · destino intermitente"
                     startEngineMoveLEDs(suggestion.move, client: client)
                 } else if !gameSession.legalTargets.isEmpty {
@@ -1056,7 +1075,7 @@ final class BoardController: ObservableObject {
                 clearStockfishHints()
                 gameStatus = message
                 if wasEngineTurn, let suggestion = engineSuggestion {
-                    activeHintSummary = "Stockfish: \(suggestion.displayText)"
+                    activeHintSummary = "\(opponentDisplayName): \(suggestion.displayText)"
                     startEngineMoveLEDs(suggestion.move, client: client)
                 } else {
                     try await client.setLEDs(.allOff)
@@ -1271,8 +1290,8 @@ final class BoardController: ObservableObject {
         else { return }
 
         if let suggestion = engineSuggestion {
-            activeHintSummary = "Stockfish: \(suggestion.displayText)"
-            gameStatus = "Turno de Stockfish: ejecuta \(suggestion.displayText) en el tablero."
+            activeHintSummary = "\(opponentDisplayName): \(suggestion.displayText)"
+            gameStatus = "Turno de \(opponentDisplayName): ejecuta \(suggestion.displayText) en el tablero."
             startEngineMoveLEDs(suggestion.move, client: client)
             return
         }
@@ -1280,9 +1299,16 @@ final class BoardController: ObservableObject {
         engineMoveGeneration += 1
         let generation = engineMoveGeneration
         let fen = logicalFEN
-        let strength = gameSession.gameRecord.engineStrength ?? .full
+        let history = gameSession.moves.map(\.lan)
+        let positionHistory = [gameSession.gameRecord.initialFEN]
+            + gameSession.moves.map(\.fenAfter)
+        let configuration = resolvedOpponentConfiguration
+        guard let engine = currentOpponentEngine else {
+            gameStatus = "No se pudo iniciar el motor rival \(opponentDisplayName)."
+            return
+        }
         isEngineThinking = true
-        gameStatus = "Stockfish está calculando su jugada (\(strength.displayText))…"
+        gameStatus = "\(opponentDisplayName) está calculando su jugada (\(configuration.strengthDisplayText))…"
 
         engineMoveTask = Task { [weak self] in
             guard let self else { return }
@@ -1294,25 +1320,28 @@ final class BoardController: ObservableObject {
             }
 
             do {
-                let analysis = try await StockfishEngine.shared.analyze(
-                    fen: fen,
-                    nodeLimit: 80_000,
-                    strength: strength
+                let response = try await engine.move(
+                    for: ChessPlayingRequest(
+                        fen: fen,
+                        moveHistory: history,
+                        positionHistory: positionHistory,
+                        configuration: configuration
+                    )
+                )
+                let expectedMove = try OpponentMoveValidator.validatedMove(
+                    uci: response.uci,
+                    fen: fen
                 )
                 try Task.checkCancellation()
                 guard self.engineMoveGeneration == generation,
                       self.logicalFEN == fen,
-                      self.isEngineTurn,
-                      let expectedMove = OTBExpectedMove(uci: analysis.bestMove)
+                      self.isEngineTurn
                 else { return }
 
-                let suggestion = SoloEngineSuggestion(
-                    move: expectedMove,
-                    evaluation: analysis.score
-                )
+                let suggestion = SoloEngineSuggestion(move: expectedMove)
                 self.engineSuggestion = suggestion
-                self.gameStatus = "Turno de Stockfish: ejecuta \(suggestion.displayText) en el tablero."
-                self.activeHintSummary = "Stockfish: \(suggestion.displayText) · origen fijo · destino intermitente"
+                self.gameStatus = "Turno de \(self.opponentDisplayName): ejecuta \(suggestion.displayText) en el tablero."
+                self.activeHintSummary = "\(self.opponentDisplayName): \(suggestion.displayText) · origen fijo · destino intermitente"
                 if self.client === client, self.isConnected {
                     self.startEngineMoveLEDs(expectedMove, client: client)
                 }
@@ -1320,7 +1349,7 @@ final class BoardController: ObservableObject {
                 // A new game or completed engine move superseded this search.
             } catch {
                 guard self.engineMoveGeneration == generation else { return }
-                self.gameStatus = "No se pudo obtener la jugada de Stockfish: \(error.localizedDescription)"
+                self.gameStatus = "No se pudo obtener la jugada de \(self.opponentDisplayName): \(error.localizedDescription)"
             }
         }
     }
@@ -1339,6 +1368,9 @@ final class BoardController: ObservableObject {
         engineMoveGeneration += 1
         engineMoveTask?.cancel()
         engineMoveTask = nil
+        if let currentOpponentEngine {
+            Task { await currentOpponentEngine.cancel() }
+        }
         isEngineThinking = false
         if clearSuggestion {
             engineSuggestion = nil
@@ -1459,7 +1491,8 @@ final class BoardController: ObservableObject {
         blackPlayerName = gameSession.gameRecord.blackPlayer
         gameMode = gameSession.gameRecord.mode
         humanSide = gameSession.gameRecord.humanSide
-        engineStrength = gameSession.gameRecord.engineStrength
+        opponentEngineConfiguration = gameSession.gameRecord.opponentEngine
+        engineStrength = opponentEngineConfiguration?.stockfishStrength
         isUndoAllowed = gameSession.gameRecord.mode == .twoPlayer && gameSession.gameRecord.allowUndo
         canUndoMove = gameSession.canUndoLastMove
 
@@ -1475,6 +1508,7 @@ final class BoardController: ObservableObject {
             isGameFinished = false
             isPromotionPending = false
             humanSide = nil
+            opponentEngineConfiguration = nil
             engineStrength = nil
             isUndoAllowed = false
             canUndoMove = false
@@ -1534,6 +1568,7 @@ final class BoardController: ObservableObject {
         let idleBlack = normalizedNonEnginePlayerName(blackPlayerName, fallback: "Negras")
 
         hasActiveGame = false
+        currentOpponentEngine = nil
         gameSession.reset(
             whitePlayer: idleWhite,
             blackPlayer: idleBlack
@@ -1543,10 +1578,30 @@ final class BoardController: ObservableObject {
         gameStatus = idleGameStatus
     }
 
+    private var resolvedOpponentConfiguration: OpponentEngineConfiguration {
+        gameSession.gameRecord.opponentEngine
+            ?? .stockfish(gameSession.gameRecord.engineStrength ?? .full)
+    }
+
+    private func configureOpponentEngineIfNeeded() {
+        guard hasActiveGame, gameSession.gameRecord.mode == .solo else {
+            currentOpponentEngine = nil
+            return
+        }
+
+        let configuration = resolvedOpponentConfiguration
+        do {
+            currentOpponentEngine = try opponentEngineBuilder(configuration)
+        } catch {
+            currentOpponentEngine = nil
+            gameStatus = "No se pudo preparar \(configuration.displayName): \(error.localizedDescription)"
+        }
+    }
+
     private func normalizedHumanName(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
-              !trimmed.localizedCaseInsensitiveContains("stockfish"),
+              !isReservedEngineName(trimmed),
               trimmed.localizedCaseInsensitiveCompare("Blancas") != .orderedSame,
               trimmed.localizedCaseInsensitiveCompare("Negras") != .orderedSame
         else {
@@ -1557,10 +1612,17 @@ final class BoardController: ObservableObject {
 
     private func normalizedNonEnginePlayerName(_ value: String, fallback: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.localizedCaseInsensitiveContains("stockfish") else {
+        guard !trimmed.isEmpty, !isReservedEngineName(trimmed) else {
             return fallback
         }
         return trimmed
+    }
+
+    private func isReservedEngineName(_ value: String) -> Bool {
+        OpponentEngineKind.allCases.contains {
+            value.localizedCaseInsensitiveContains($0.displayName)
+                || value.localizedCaseInsensitiveContains($0.rawValue)
+        }
     }
 
     private func turnOffAutomaticLEDs() {
@@ -1911,7 +1973,7 @@ extension BoardController {
         else { return }
 
         if let suggestion = engineSuggestion {
-            gameStatus = "Stockfish juega \(suggestion.displayText) automáticamente en la pantalla."
+            gameStatus = "\(opponentDisplayName) juega \(suggestion.displayText) automáticamente en la pantalla."
             performScreenMove(
                 from: suggestion.move.from,
                 to: suggestion.move.to,
@@ -1924,9 +1986,16 @@ extension BoardController {
         engineMoveGeneration += 1
         let generation = engineMoveGeneration
         let fen = logicalFEN
-        let strength = gameSession.gameRecord.engineStrength ?? .full
+        let history = gameSession.moves.map(\.lan)
+        let positionHistory = [gameSession.gameRecord.initialFEN]
+            + gameSession.moves.map(\.fenAfter)
+        let configuration = resolvedOpponentConfiguration
+        guard let engine = currentOpponentEngine else {
+            gameStatus = "No se pudo iniciar el motor rival \(opponentDisplayName)."
+            return
+        }
         isEngineThinking = true
-        gameStatus = "Stockfish está calculando su jugada (\(strength.displayText))…"
+        gameStatus = "\(opponentDisplayName) está calculando su jugada (\(configuration.strengthDisplayText))…"
 
         engineMoveTask = Task { [weak self] in
             guard let self else { return }
@@ -1938,25 +2007,28 @@ extension BoardController {
             }
 
             do {
-                let analysis = try await StockfishEngine.shared.analyze(
-                    fen: fen,
-                    nodeLimit: 80_000,
-                    strength: strength
+                let response = try await engine.move(
+                    for: ChessPlayingRequest(
+                        fen: fen,
+                        moveHistory: history,
+                        positionHistory: positionHistory,
+                        configuration: configuration
+                    )
+                )
+                let expectedMove = try OpponentMoveValidator.validatedMove(
+                    uci: response.uci,
+                    fen: fen
                 )
                 try Task.checkCancellation()
                 guard !self.isConnected,
                       self.engineMoveGeneration == generation,
                       self.logicalFEN == fen,
-                      self.isEngineTurn,
-                      let expectedMove = OTBExpectedMove(uci: analysis.bestMove)
+                      self.isEngineTurn
                 else { return }
 
-                let suggestion = SoloEngineSuggestion(
-                    move: expectedMove,
-                    evaluation: analysis.score
-                )
+                let suggestion = SoloEngineSuggestion(move: expectedMove)
                 self.engineSuggestion = suggestion
-                self.gameStatus = "Stockfish juega \(suggestion.displayText) automáticamente en la pantalla."
+                self.gameStatus = "\(self.opponentDisplayName) juega \(suggestion.displayText) automáticamente en la pantalla."
                 self.performScreenMove(
                     from: expectedMove.from,
                     to: expectedMove.to,
@@ -1967,7 +2039,7 @@ extension BoardController {
                 // A new game, reconnection or completed move superseded this search.
             } catch {
                 guard self.engineMoveGeneration == generation else { return }
-                self.gameStatus = "No se pudo obtener la jugada de Stockfish: \(error.localizedDescription)"
+                self.gameStatus = "No se pudo obtener la jugada de \(self.opponentDisplayName): \(error.localizedDescription)"
             }
         }
     }

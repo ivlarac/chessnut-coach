@@ -45,7 +45,7 @@ private struct AppInformationView: View {
                     LabeledContent("Versión", value: appVersion)
                     LabeledContent("Build", value: buildNumber)
 
-                    Text("Asistente para jugar y registrar partidas con tableros electrónicos compatibles, con análisis y ayuda opcional mediante Stockfish 18.")
+                    Text("Asistente para jugar y registrar partidas con tableros electrónicos compatibles, con Stockfish 18 para análisis y Stockfish o Maia 3 como rival.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -58,7 +58,7 @@ private struct AppInformationView: View {
                     )
                     informationRow(
                         title: "Modos de juego",
-                        description: "Partidas contra otra persona o contra Stockfish 18.",
+                        description: "Partidas contra otra persona, Stockfish 18 o Maia 3 con estilo humano.",
                         systemImage: "checkerboard.rectangle"
                     )
                     informationRow(
@@ -80,7 +80,8 @@ private struct AppInformationView: View {
 
                 Section("Compatibilidad") {
                     LabeledContent("iOS", value: "16 o posterior")
-                    LabeledContent("Motor", value: "Stockfish 18")
+                    LabeledContent("Análisis", value: "Stockfish 18")
+                    LabeledContent("Rivales", value: "Stockfish 18 · Maia 3")
 
                     ForEach(supportedBoards) { support in
                         VStack(alignment: .leading, spacing: 4) {
@@ -97,15 +98,15 @@ private struct AppInformationView: View {
                 }
 
                 Section("Licencia y autoría") {
-                    LabeledContent("Licencia", value: "Apache 2.0")
+                    LabeledContent("Licencia de la aplicación", value: "AGPL-3.0-only")
                     LabeledContent("Autoría", value: "ivlarac")
 
                     Link(
-                        "Repositorio original",
+                        "Código fuente y licencia completa",
                         destination: URL(string: "https://github.com/ivlarac/chessnut-coach")!
                     )
 
-                    Text("© 2026 ivlarac. El código original de Chessnut Coach puede utilizarse, modificarse y redistribuirse bajo Apache License 2.0, conservando los avisos de licencia, copyright y atribución aplicables. Los componentes de terceros mantienen sus propias licencias.")
+                    Text("© 2026 ivlarac. Esta versión se distribuye bajo GNU AGPL v3, sin garantía. Maia3-5M © University of Toronto CSSLab se incluye bajo AGPL-3.0. El código publicado anteriormente bajo Apache 2.0 conserva sus avisos y licencia originales; Stockfish conserva GPLv3.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

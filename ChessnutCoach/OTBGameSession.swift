@@ -97,6 +97,7 @@ struct OTBGameSession: Sendable {
         blackPlayer: String = "Negras",
         mode: GameMode = .twoPlayer,
         humanSide: PlayerSide? = nil,
+        opponentEngine: OpponentEngineConfiguration? = nil,
         engineStrength: StockfishStrength? = nil,
         engineName: String? = nil,
         allowUndo: Bool = false
@@ -109,6 +110,7 @@ struct OTBGameSession: Sendable {
             blackPlayer: blackPlayer,
             mode: mode,
             humanSide: humanSide,
+            opponentEngine: opponentEngine,
             engineStrength: engineStrength,
             engineName: engineName,
             allowUndo: mode == .twoPlayer && allowUndo
@@ -167,6 +169,7 @@ struct OTBGameSession: Sendable {
         blackPlayer: String = "Negras",
         mode: GameMode = .twoPlayer,
         humanSide: PlayerSide? = nil,
+        opponentEngine: OpponentEngineConfiguration? = nil,
         engineStrength: StockfishStrength? = nil,
         engineName: String? = nil,
         allowUndo: Bool = false
@@ -177,6 +180,7 @@ struct OTBGameSession: Sendable {
             blackPlayer: blackPlayer,
             mode: mode,
             humanSide: humanSide,
+            opponentEngine: opponentEngine,
             engineStrength: engineStrength,
             engineName: engineName,
             allowUndo: allowUndo
@@ -319,7 +323,8 @@ struct OTBGameSession: Sendable {
                 liftedSquare = nil
                 legalTargets = []
                 isSynchronized = false
-                return .invalid("Es el turno de Stockfish. Ejecuta \(requiredMove.displayText) en el tablero.")
+                let opponentName = gameRecord.opponentEngine?.displayName ?? "el motor rival"
+                return .invalid("Es el turno de \(opponentName). Ejecuta \(requiredMove.displayText) en el tablero.")
             }
             let allTargets = board.legalMoves(forPieceAt: source)
             let targets = requiredMove.map { allTargets.contains($0.to) ? [$0.to] : [] } ?? allTargets
