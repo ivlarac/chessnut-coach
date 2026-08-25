@@ -29,6 +29,8 @@ let package = Package(
                 "CurrentGameView.swift",
                 "DiagnosticsView.swift",
                 "EngineDiagnosticController.swift",
+                "Maia3CoreMLEngine.swift",
+                "Models",
                 "GameLibrary.swift",
                 "GameLibraryView.swift",
                 "Info.plist",

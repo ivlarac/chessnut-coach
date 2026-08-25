@@ -230,11 +230,11 @@ Antes del merge de esta PR:
 
 ## Juego en solitario y motores rivales
 
-El botón **Nueva partida** está siempre visible y permite elegir entre **Contra persona** y **Contra IA**, incluso antes de conectar el tablero. El motor rival está desacoplado de la evaluación objetiva: actualmente Stockfish 18 es el rival jugable, mientras Stockfish continúa siendo siempre el responsable de las ayudas, centipeones, blunders y análisis.
+El botón **Nueva partida** está siempre visible y permite elegir entre **Contra persona** y **Contra IA**, incluso antes de conectar el tablero. El motor rival está desacoplado de la evaluación objetiva: se puede jugar contra **Stockfish 18** o **Maia 3**, mientras Stockfish continúa siendo siempre el responsable de las ayudas, centipeones, blunders y análisis.
 
 Los niveles 1 a 19 recorren el rango real `UCI_Elo` de 1320 a 3190. El nivel 20 utiliza Stockfish sin limitación. El diseño, persistencia, estados y criterios de aceptación están en [`PHASE_9_SOLO_MODE.md`](PHASE_9_SOLO_MODE.md).
 
-Maia 3 aparece como opción bloqueada, no como una implementación simulada. La conversión oficial Maia3-5M a Core ML para iOS 16 es técnicamente viable (~11 MB FP16), pero el código y los pesos oficiales están bajo AGPL-3.0 y no se redistribuyen sin una decisión explícita sobre la licencia de la aplicación y el canal iOS. La investigación reproducible, revisiones exactas y pasos para habilitarlo están en [`MAIA3_INTEGRATION.md`](MAIA3_INTEGRATION.md).
+Maia 3 utiliza el modelo oficial Maia3-5M convertido a Core ML FP16 (~11 MB) y ejecutado íntegramente en el dispositivo. Permite niveles aproximados de 600 a 2600 en pasos de 100 y muestrea la política con Temperature 1,0 y TopP 0,95. Usa hasta ocho posiciones recientes y ChessKit valida siempre la legalidad. La implementación, reproducibilidad y licencias están en [`MAIA3_INTEGRATION.md`](MAIA3_INTEGRATION.md).
 
 ## Validación física de la fase 9
 
@@ -248,6 +248,8 @@ Maia 3 aparece como opción bloqueada, no como una implementación simulada. La 
 8. confirma que evaluación, mejor jugada y barra lateral cambian con cada posición;
 9. comprueba visualmente `+0,00`, una ventaja de blancas, una de negras y posiciones de mate para ambos bandos;
 10. exporta el PGN y confirma las etiquetas `Mode`, `HumanSide`, `Engine` y `EngineStrength`.
+11. crea partidas Maia a nivel 600, 800 y 1000, tanto con blancas como con negras, y confirma que sus respuestas son legales y se ejecutan automáticamente en pantalla;
+12. repite una partida Maia con tablero físico y confirma que la jugada se indica por LEDs y sólo se registra al reproducirla físicamente.
 
 ## Pruebas automáticas
 
@@ -265,6 +267,7 @@ CI:
 - verifica codificación de jugadores y duración, exportación PGN y reconstrucción de sesiones;
 - verifica con Core Data en memoria las operaciones de alta, actualización y borrado sin duplicados;
 - arranca Stockfish 18 realmente en iOS Simulator;
+- carga Maia3-5M realmente con Core ML, verifica `e2e4` en la posición inicial de referencia y completa automáticamente una respuesta en una partida virtual;
 - analiza los destinos `e2→e3` y `e2→e4` mediante la misma capa de coaching usada por el Chessnut.
 
 ## Dependencias y licencia
@@ -272,8 +275,9 @@ CI:
 - EasyLinkSwiftSDK: Bluetooth/FEN/LEDs del Chessnut.
 - ChessKit: reglas y posición lógica.
 - Stockfish 18: GNU GPL v3 o posterior.
+- Maia 3 y Maia3-5M: GNU AGPL v3.
 
-Si la aplicación se distribuye a terceros, deberán revisarse y cumplirse las obligaciones de la GPL y la publicación del código fuente correspondiente.
+La obra combinada se distribuye bajo **GNU AGPL v3 únicamente**. El código de Chessnut Coach publicado anteriormente bajo Apache 2.0 conserva esa concesión y sus avisos; los componentes de terceros mantienen sus licencias. Al distribuir binarios debe ofrecerse el código fuente correspondiente desde el mismo lugar y conservarse `LICENSE` y `NOTICE`.
 
 ## Roadmap
 

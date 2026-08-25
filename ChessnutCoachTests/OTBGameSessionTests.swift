@@ -165,7 +165,7 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertEqual(Maia3Strength(rating: 800, topP: 4).topP, 1)
     }
 
-    func testMaiaCannotLaunchWhileOfficialLicenseBlockIsUnresolved() {
+    func testMaiaCanLaunchWithSelectedApproximateRating() throws {
         var draft = NewGameDraft(
             whitePlayerName: "Blancas",
             blackPlayerName: "Negras",
@@ -174,10 +174,13 @@ final class OTBGameSessionTests: XCTestCase {
         )
         draft.mode = .solo
         draft.opponentEngineKind = .maia3
+        draft.maia3Rating = 1_000
 
         XCTAssertTrue(draft.canStart)
-        XCTAssertFalse(draft.canLaunch)
-        XCTAssertNil(draft.makeLaunch())
+        XCTAssertTrue(draft.canLaunch)
+        let launch = try XCTUnwrap(draft.makeLaunch())
+        XCTAssertEqual(launch.configuration.opponentEngine.kind, .maia3)
+        XCTAssertEqual(launch.configuration.opponentEngine.maia3Strength?.rating, 1_000)
     }
 
     func testSelectedOpponentConfigurationPersists() throws {
@@ -305,6 +308,124 @@ final class OTBGameSessionTests: XCTestCase {
             ),
             "a2a3"
         )
+    }
+
+    func testMaiaInputEncoderMatchesSideToMovePerspectiveAndHistoryPadding() throws {
+        let standard = try Maia3InputEncoder.encode(
+            currentFEN: Position.standard.fen,
+            positionHistory: [Position.standard.fen],
+            rating: 800
+        )
+
+        XCTAssertEqual(standard.boardHistory.count, 64 * 96)
+        XCTAssertEqual(standard.selfRating, 800)
+        XCTAssertEqual(standard.opponentRating, 800)
+        for historyIndex in 0..<8 {
+            XCTAssertEqual(standard.boardHistory[Square.a1.rawValue * 96 + historyIndex * 12 + 3], 1)
+            XCTAssertEqual(standard.boardHistory[Square.a8.rawValue * 96 + historyIndex * 12 + 9], 1)
+        }
+
+        var afterE4 = Board()
+        _ = try XCTUnwrap(afterE4.move(pieceAt: .e2, to: .e4))
+        let blackToMove = try Maia3InputEncoder.encode(
+            currentFEN: afterE4.position.fen,
+            positionHistory: [Position.standard.fen, afterE4.position.fen],
+            rating: 1_000
+        )
+
+        XCTAssertEqual(blackToMove.boardHistory[Square.e1.rawValue * 96 + 7 * 12 + 5], 1)
+        XCTAssertEqual(blackToMove.boardHistory[Square.e8.rawValue * 96 + 7 * 12 + 11], 1)
+        XCTAssertEqual(blackToMove.boardHistory[Square.e5.rawValue * 96 + 7 * 12 + 6], 1)
+    }
+
+    func testMaiaMoveVocabularyMirrorsBlackAndIncludesSpecialMoves() throws {
+        XCTAssertEqual(
+            Maia3MoveVocabulary.vocabularyIndex(for: "e2e4", sideToMove: .white),
+            Maia3MoveVocabulary.vocabularyIndex(for: "e7e5", sideToMove: .black)
+        )
+        XCTAssertEqual(
+            Maia3MoveVocabulary.vocabularyIndex(for: "a7a8q", sideToMove: .white),
+            4_096
+        )
+        XCTAssertEqual(
+            Maia3MoveVocabulary.vocabularyIndex(for: "a2a1q", sideToMove: .black),
+            4_096
+        )
+
+        let startingMoves = try Maia3MoveVocabulary.legalMoves(fen: Position.standard.fen)
+        XCTAssertEqual(startingMoves.count, 20)
+        XCTAssertNotNil(startingMoves["e2e4"])
+
+        let castling = try Maia3MoveVocabulary.legalMoves(
+            fen: "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"
+        )
+        XCTAssertNotNil(castling["e1g1"])
+
+        let enPassant = try Maia3MoveVocabulary.legalMoves(
+            fen: "8/8/8/3pP3/8/8/8/K6k w - d6 0 1"
+        )
+        XCTAssertNotNil(enPassant["e5d6"])
+
+        let promotion = try Maia3MoveVocabulary.legalMoves(
+            fen: "8/P7/8/8/8/8/7k/K7 w - - 0 1"
+        )
+        XCTAssertEqual(
+            Set(promotion.keys.filter { $0.hasPrefix("a7a8") }),
+            Set(["a7a8q", "a7a8r", "a7a8b", "a7a8n"])
+        )
+    }
+
+    func testMaiaOpponentUsesPolicyLogitsAndReturnsOnlyALegalMove() async throws {
+        let preferredIndex = try XCTUnwrap(
+            Maia3MoveVocabulary.vocabularyIndex(for: "e2e4", sideToMove: .white)
+        )
+        let predictor = TestMaiaPolicyPredictor(preferredIndex: preferredIndex)
+        let engine = Maia3OpponentEngine(predictor: predictor, randomUnitInterval: { 0 })
+        let response = try await engine.move(
+            for: ChessPlayingRequest(
+                fen: Position.standard.fen,
+                moveHistory: [],
+                positionHistory: [Position.standard.fen],
+                configuration: .maia3(
+                    Maia3Strength(rating: 800, temperature: 0, topP: 0.95, seed: 7)
+                )
+            )
+        )
+
+        XCTAssertEqual(response, ChessPlayingMove(uci: "e2e4"))
+        XCTAssertNoThrow(
+            try OpponentMoveValidator.validatedMove(
+                uci: response.uci,
+                fen: Position.standard.fen
+            )
+        )
+    }
+
+    func testMaiaOpponentCancellationRejectsLateInference() async throws {
+        let predictor = TestMaiaPolicyPredictor(
+            preferredIndex: 0,
+            delay: .milliseconds(150)
+        )
+        let engine = Maia3OpponentEngine(predictor: predictor)
+        let task = Task {
+            try await engine.move(
+                for: ChessPlayingRequest(
+                    fen: Position.standard.fen,
+                    moveHistory: [],
+                    positionHistory: [Position.standard.fen],
+                    configuration: .maia3(Maia3Strength(rating: 800, seed: 1))
+                )
+            )
+        }
+
+        try await Task.sleep(for: .milliseconds(30))
+        await engine.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("A late Maia result must be cancelled")
+        } catch is CancellationError {
+            // Expected.
+        }
     }
 
     func testNewGameDraftPreservesEditedPlayerNamesInLaunch() throws {
@@ -1139,6 +1260,30 @@ final class OTBGameSessionTests: XCTestCase {
         XCTAssertTrue(wasCancelled)
     }
 
+    @MainActor
+    func testVirtualSoloGameAutomaticallyAppliesBundledMaiaMove() async throws {
+        let controller = BoardController(library: GameLibrary(inMemory: true))
+        controller.newGame(
+            configuration: NewGameConfiguration(
+                mode: .solo,
+                humanSide: .white,
+                opponentEngine: .maia3(
+                    Maia3Strength(rating: 800, temperature: 1, topP: 0.95, seed: 42)
+                ),
+                assistance: AssistanceSettings(white: .off, black: .off)
+            )
+        )
+
+        controller.handleScreenMove(from: "e2", to: "e4")
+        try await waitUntil(timeoutIterations: 400) {
+            controller.moveCount == 2 && !controller.isEngineThinking
+        }
+
+        XCTAssertEqual(controller.moveCount, 2)
+        XCTAssertEqual(controller.sideToMoveLabel, "Blancas")
+        XCTAssertTrue(controller.hasActiveGame)
+    }
+
     func testMonitoredTransportBroadcastsDisconnectWithoutHidingItFromClientStream() async {
         let underlying = TestEasyLinkTransport()
         let monitored = MonitoredEasyLinkTransport(wrapping: underlying)
@@ -1325,6 +1470,31 @@ final class OTBGameSessionTests: XCTestCase {
         )
     }
 
+    func testBundledMaia3ModelProducesARealLegalMove() async throws {
+        let engine = Maia3OpponentEngine(
+            predictor: Maia3CoreMLPolicyModel.shared,
+            randomUnitInterval: { 0.5 }
+        )
+        let response = try await engine.move(
+            for: ChessPlayingRequest(
+                fen: Position.standard.fen,
+                moveHistory: [],
+                positionHistory: [Position.standard.fen],
+                configuration: .maia3(
+                    Maia3Strength(rating: 800, temperature: 1, topP: 0.95, seed: 42)
+                )
+            )
+        )
+
+        XCTAssertEqual(response.uci, "e2e4")
+        XCTAssertNoThrow(
+            try OpponentMoveValidator.validatedMove(
+                uci: response.uci,
+                fen: Position.standard.fen
+            )
+        )
+    }
+
     func testStockfishCoachEvaluatesEveryDestinationOfLiftedE2Pawn() async throws {
         let engine = StockfishEngine(defaultNodeLimit: 8_000)
         let coach = StockfishMoveCoach(
@@ -1375,6 +1545,28 @@ final class OTBGameSessionTests: XCTestCase {
 
     private func placement(from fen: String) -> String {
         fen.split(separator: " ").first.map(String.init) ?? fen
+    }
+}
+
+private actor TestMaiaPolicyPredictor: Maia3PolicyPredicting {
+    let preferredIndex: Int
+    let delay: Duration?
+
+    init(preferredIndex: Int, delay: Duration? = nil) {
+        self.preferredIndex = preferredIndex
+        self.delay = delay
+    }
+
+    func predict(input: Maia3PolicyInput) async throws -> [Double] {
+        _ = input
+        if let delay {
+            try? await Task.sleep(for: delay)
+        }
+        var logits = Array(repeating: -100.0, count: Maia3MoveVocabulary.count)
+        if logits.indices.contains(preferredIndex) {
+            logits[preferredIndex] = 100
+        }
+        return logits
     }
 }
 

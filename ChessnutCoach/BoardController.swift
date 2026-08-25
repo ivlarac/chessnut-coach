@@ -157,7 +157,7 @@ final class BoardController: ObservableObject {
             configuration in
             switch configuration.kind {
             case .stockfish18: StockfishOpponentEngine()
-            case .maia3: UnavailableMaia3Engine()
+            case .maia3: Maia3OpponentEngine(predictor: Maia3CoreMLPolicyModel.shared)
             }
         }
     ) {
@@ -1214,6 +1214,8 @@ final class BoardController: ObservableObject {
         let generation = engineMoveGeneration
         let fen = logicalFEN
         let history = gameSession.moves.map(\.lan)
+        let positionHistory = [gameSession.gameRecord.initialFEN]
+            + gameSession.moves.map(\.fenAfter)
         let configuration = resolvedOpponentConfiguration
         guard let engine = currentOpponentEngine else {
             gameStatus = "No se pudo iniciar el motor rival \(opponentDisplayName)."
@@ -1236,6 +1238,7 @@ final class BoardController: ObservableObject {
                     for: ChessPlayingRequest(
                         fen: fen,
                         moveHistory: history,
+                        positionHistory: positionHistory,
                         configuration: configuration
                     )
                 )
@@ -1852,6 +1855,8 @@ extension BoardController {
         let generation = engineMoveGeneration
         let fen = logicalFEN
         let history = gameSession.moves.map(\.lan)
+        let positionHistory = [gameSession.gameRecord.initialFEN]
+            + gameSession.moves.map(\.fenAfter)
         let configuration = resolvedOpponentConfiguration
         guard let engine = currentOpponentEngine else {
             gameStatus = "No se pudo iniciar el motor rival \(opponentDisplayName)."
@@ -1874,6 +1879,7 @@ extension BoardController {
                     for: ChessPlayingRequest(
                         fen: fen,
                         moveHistory: history,
+                        positionHistory: positionHistory,
                         configuration: configuration
                     )
                 )

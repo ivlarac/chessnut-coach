@@ -1,82 +1,80 @@
-# Maia 3 integration assessment
+# Maia 3 on-device integration
 
 ## Status
 
-Maia 3 is **not bundled or enabled** in this release. The opponent-engine
-architecture, persistence schema, legal-move validator and deterministic policy
-sampler are ready, but the official model cannot be redistributed without an
-explicit licensing decision by the project owner.
+Maia 3 is bundled and enabled as a real on-device opponent. It does not call a
+server, run Python on iOS, use random chess moves or delegate play to Stockfish.
+Stockfish remains the only objective analysis and coaching engine.
 
-The new-game screen exposes Maia 3 as locked so the limitation is visible. It
-does not run random moves, relabel Stockfish, call a remote service or depend on
-Python at runtime.
+The project owner explicitly authorized adoption of AGPL-3.0-only for the
+combined application. The root `LICENSE`, `NOTICE`, in-app legal notice and
+corresponding source were updated together with this integration.
 
-## Verified upstream facts
+## Audited upstream material
 
 - Official source: <https://github.com/CSSLab/maia3>
-- Audited upstream commit: `1e13597c42d4858b7cfd7cfdae01e297263364b2`
+- Vendored source commit: `1e13597c42d4858b7cfd7cfdae01e297263364b2`
 - Official model: <https://huggingface.co/UofTCSSLab/Maia3-5M>
-- Audited model revision: `b6559de2398d7140b985f28fd2c19fb5e47ddabe`
-- Official checkpoint: `maia3-5m.pt`, 20,968,049 bytes
-- Audited SHA-256: `ba14208b2992d85502f5fb501934abf6aaaeb355e9f3fdf90e326911f562524f`
-- The source repository identifies its license as **GNU AGPL-3.0**.
-- The model card says to consult the repository for the code/weights license; it
-  does not grant a separate permissive license for the checkpoint.
+- Model revision: `b6559de2398d7140b985f28fd2c19fb5e47ddabe`
+- Checkpoint: `maia3-5m.pt`, 20,968,049 bytes
+- Checkpoint SHA-256: `ba14208b2992d85502f5fb501934abf6aaaeb355e9f3fdf90e326911f562524f`
+- License: GNU AGPL-3.0-only
 
-Converting the checkpoint does not erase its license. A converted Core ML model
-would still be a redistributed copy derived from the official weights.
+The preferred checkpoint and audited Python source are retained under
+`Vendor/Maia3/source`. `Scripts/convert_maia3_coreml.py` verifies the checkpoint
+hash and reproduces the bundled Core ML package.
 
-## Core ML feasibility result
+## Core ML model
 
-A local, uncommitted feasibility conversion was performed with the official 5M
-checkpoint, PyTorch 2.8 CPU and coremltools 9.0:
-
-- fixed inputs: eight historical positions (`1 × 64 × 96`) plus self/opponent
-  rating;
-- outputs: 4,352 move logits, three WDL logits and one ponder output;
 - deployment target: iOS 16;
 - precision: FP16;
-- converted package size: approximately 11 MB;
-- all checkpoint keys loaded with no missing or unexpected parameters;
-- traced PyTorch output matched eager PyTorch output exactly before conversion.
+- package size: approximately 11 MB;
+- inputs: eight positions (`1 × 64 × 96`), self rating and opponent rating;
+- output: 4,352 move-policy logits;
+- loading: lazy on the first Maia turn, then reused by the actor;
+- compute units: Core ML `.all`, allowing iOS to choose CPU/GPU/Neural Engine.
 
-PyTorch `RMSNorm` had to be decomposed into equivalent primitive operations for
-Core ML conversion. Core ML execution equivalence and latency still need to be
-measured on macOS/iPhone because Linux cannot load Apple's Core ML runtime.
+The official PyTorch model uses RMSNorm, which was decomposed into the
+equivalent primitive formula for Core ML conversion. Before conversion, eager
+PyTorch and the exported graph are required to match exactly. The app smoke
+test loads the packaged model and runs a real starting-position prediction.
 
-This shows that Core ML is the preferred technical route; ONNX Runtime is not
-needed at present and therefore no additional runtime dependency was added.
+## Position and move semantics
 
-## Required decision before enabling Maia
+Each position is encoded from the side-to-move perspective exactly as upstream:
+black-to-move boards are rank-mirrored and colors are swapped. Up to the eight
+most recent logical FEN positions are used; short histories are left-padded by
+the earliest available position.
 
-Before committing a converted model or Maia-derived inference implementation,
-the project owner should do one of the following:
+Both Maia rating inputs use the selected approximate level from 600 through
+2600 in steps of 100. The UI deliberately does not present this as an exact
+FIDE, Chess.com or Lichess equivalence.
 
-1. obtain a separate redistribution license or written exception for the Maia 3
-   code and Maia3-5M weights that is compatible with the intended iOS channel; or
-2. explicitly adopt and satisfy AGPL-3.0 for the combined distributed work,
-   including review of App Store terms, complete corresponding source and all
-   notices; or
-3. select a genuinely compatible human-like model with documented model-weight
-   redistribution terms.
+Only ChessKit-generated legal moves are mapped into Maia's vocabulary. Illegal
+logits are never sampled. The selected move is validated again against the
+current ChessKit position before it reaches the game session, covering
+castling, en passant and all four promotion kinds.
 
-This is a licensing risk assessment, not legal advice. The project should obtain
-qualified legal review before choosing option 2.
+Policy selection uses Temperature `1.0` and TopP `0.95`, matching a human-like
+distribution instead of always taking argmax. An optional seed produces a
+stable value derived from the current FEN; tests may inject the random source.
 
-## Integration work remaining after permission
+## Cancellation and failures
 
-Once redistribution is authorized, enabling Maia is intentionally localized:
+Core ML does not expose interruption of an individual synchronous prediction.
+Cancellation therefore invalidates the Maia generation before and after
+inference. `BoardController` additionally checks its own generation, FEN and
+turn before applying a move. A late result can consume compute briefly but
+cannot mutate a newer or finished game.
 
-1. add the verified `.mlpackage` resource and attribution/license texts;
-2. implement `ChessPlayingEngine` with lazy `MLModel` loading and instance reuse;
-3. tokenize up to eight recorded positions from `ChessPlayingRequest.moveHistory`;
-4. condition both rating inputs on the selected 600–2600 level;
-5. mask logits with ChessKit legal moves, then sample with temperature `1.0` and
-   TopP `0.95` using an injected seeded random source;
-6. validate the sampled UCI move again through `OpponentMoveValidator` before
-   returning it;
-7. enable `OpponentEngineKind.maia3.isPlayableInThisBuild` and add an on-device
-   smoke test for the official model.
+Missing resources, malformed output, an invalid position, an empty legal set or
+an illegal selected move produce a visible engine error and leave the logical
+game unchanged.
 
-Stockfish remains the sole source of objective centipawn evaluation, coaching,
-blunder classification, best lines and full-game analysis.
+## Distribution note
+
+AGPL requires preservation of notices and availability of complete
+corresponding source. Apple distribution terms may add restrictions depending
+on the chosen channel. Relicensing the repository does not by itself guarantee
+App Store acceptance or eliminate the need to review the applicable Apple
+agreements before submission.

@@ -863,28 +863,13 @@ private struct NewGameSetupView: View {
                     Section("Motor rival") {
                         Picker("Motor", selection: $draft.opponentEngineKind) {
                             ForEach(OpponentEngineKind.allCases) { engine in
-                                HStack {
-                                    Text(engine.displayName)
-                                    if !engine.isPlayableInThisBuild {
-                                        Image(systemName: "lock.fill")
-                                    }
-                                }
-                                .tag(engine)
+                                Text(engine.selectionLabel).tag(engine)
                             }
                         }
 
                         Text(draft.opponentEngineKind.styleDescription)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-
-                        if draft.opponentEngineKind == .maia3 {
-                            Label(
-                                "No disponible en esta compilación. El código y los pesos oficiales son AGPL-3.0; incorporarlos requiere resolver expresamente la licencia y la distribución de la app.",
-                                systemImage: "lock.trianglebadge.exclamationmark"
-                            )
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                        }
                     }
                 }
 
@@ -971,7 +956,7 @@ private struct NewGameSetupView: View {
                             LabeledContent("Rating del modelo", value: "≈ \(draft.maia3Rating)")
                         }
 
-                        Text("Rango previsto: 600–2600 en pasos de 100. No equivale exactamente a rating FIDE, Chess.com o Lichess.")
+                        Text("Maia condiciona ambos ratings al nivel elegido y muestrea su política con Temperature 1,0 y TopP 0,95. Es un nivel aproximado, no una equivalencia exacta con FIDE, Chess.com o Lichess.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

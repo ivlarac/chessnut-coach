@@ -294,18 +294,6 @@ actor StockfishOpponentEngine: ChessPlayingEngine {
     }
 }
 
-actor UnavailableMaia3Engine: ChessPlayingEngine {
-    nonisolated let kind = OpponentEngineKind.maia3
-
-    func move(for request: ChessPlayingRequest) async throws -> ChessPlayingMove {
-        throw ChessPlayingEngineError.unavailable(
-            "Maia 3 no se incluye en esta compilación: sus pesos y código oficiales son AGPL-3.0 y requieren una decisión explícita de licencia y distribución antes de incorporarlos a la app."
-        )
-    }
-
-    func cancel() async {}
-}
-
 private func decodeCString(_ buffer: [CChar]) -> String {
     let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
     return String(decoding: bytes, as: UTF8.self)

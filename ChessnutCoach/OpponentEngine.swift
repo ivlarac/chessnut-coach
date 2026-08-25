@@ -14,6 +14,13 @@ enum OpponentEngineKind: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var selectionLabel: String {
+        switch self {
+        case .stockfish18: "Stockfish 18"
+        case .maia3: "Maia 3 · estilo humano"
+        }
+    }
+
     var styleDescription: String {
         switch self {
         case .stockfish18:
@@ -23,15 +30,7 @@ enum OpponentEngineKind: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Maia3's official code and weights are AGPL-3.0. Shipping a converted
-    /// model requires an explicit project-wide licensing/distribution decision,
-    /// so it must not be presented as playable until that decision is made.
-    var isPlayableInThisBuild: Bool {
-        switch self {
-        case .stockfish18: true
-        case .maia3: false
-        }
-    }
+    var isPlayableInThisBuild: Bool { true }
 }
 
 struct Maia3Strength: Equatable, Codable, Sendable {
@@ -123,7 +122,22 @@ struct OpponentEngineConfiguration: Equatable, Codable, Sendable {
 struct ChessPlayingRequest: Equatable, Sendable {
     let fen: String
     let moveHistory: [String]
+    /// Chronological FEN positions, including the initial and current position.
+    /// Maia 3 consumes at most the eight most recent entries.
+    let positionHistory: [String]
     let configuration: OpponentEngineConfiguration
+
+    init(
+        fen: String,
+        moveHistory: [String],
+        positionHistory: [String] = [],
+        configuration: OpponentEngineConfiguration
+    ) {
+        self.fen = fen
+        self.moveHistory = moveHistory
+        self.positionHistory = positionHistory
+        self.configuration = configuration
+    }
 }
 
 struct ChessPlayingMove: Equatable, Sendable {
@@ -188,7 +202,7 @@ enum OpponentMoveValidator {
     }
 }
 
-/// Deterministic policy sampling used by the future Core ML Maia adapter.
+/// Deterministic policy sampling used by the Core ML Maia adapter.
 /// `unitInterval` is injected so tests do not depend on global randomness.
 enum MaiaMoveSampler {
     static func sample(
@@ -241,5 +255,262 @@ enum MaiaMoveSampler {
         }
 
         return legalLogits[retainedCount - 1].key
+    }
+}
+
+struct Maia3PolicyInput: Equatable, Sendable {
+    static let historyLength = 8
+    static let squareCount = 64
+    static let pieceChannelCount = 12
+    static let featureCount = historyLength * pieceChannelCount
+
+    let boardHistory: [Float]
+    let selfRating: Float
+    let opponentRating: Float
+}
+
+protocol Maia3PolicyPredicting: Sendable {
+    func predict(input: Maia3PolicyInput) async throws -> [Double]
+}
+
+enum Maia3InputEncoder {
+    static func encode(
+        currentFEN: String,
+        positionHistory: [String],
+        rating: Int
+    ) throws -> Maia3PolicyInput {
+        guard Position(fen: currentFEN) != nil else {
+            throw ChessPlayingEngineError.invalidPosition
+        }
+
+        var history: [Position] = []
+        for fen in positionHistory {
+            guard let position = Position(fen: fen) else {
+                throw ChessPlayingEngineError.invalidPosition
+            }
+            history.append(position)
+        }
+        if history.last?.fen != currentFEN, let current = Position(fen: currentFEN) {
+            history.append(current)
+        }
+        if history.isEmpty, let current = Position(fen: currentFEN) {
+            history = [current]
+        }
+
+        history = Array(history.suffix(Maia3PolicyInput.historyLength))
+        guard let earliest = history.first else {
+            throw ChessPlayingEngineError.invalidPosition
+        }
+        while history.count < Maia3PolicyInput.historyLength {
+            history.insert(earliest, at: 0)
+        }
+
+        var values = Array(
+            repeating: Float.zero,
+            count: Maia3PolicyInput.squareCount * Maia3PolicyInput.featureCount
+        )
+
+        for (historyIndex, position) in history.enumerated() {
+            for piece in position.pieces {
+                let squareIndex = modelSquareIndex(
+                    for: piece.square,
+                    sideToMove: position.sideToMove
+                )
+                let channel = modelPieceChannel(
+                    for: piece,
+                    sideToMove: position.sideToMove
+                )
+                let featureIndex = historyIndex * Maia3PolicyInput.pieceChannelCount + channel
+                values[squareIndex * Maia3PolicyInput.featureCount + featureIndex] = 1
+            }
+        }
+
+        return Maia3PolicyInput(
+            boardHistory: values,
+            selfRating: Float(rating),
+            opponentRating: Float(rating)
+        )
+    }
+
+    private static func modelSquareIndex(
+        for square: Square,
+        sideToMove: Piece.Color
+    ) -> Int {
+        guard sideToMove == .black else { return square.rawValue }
+        let mirroredRank = 9 - square.rank.value
+        return (mirroredRank - 1) * 8 + (square.file.number - 1)
+    }
+
+    private static func modelPieceChannel(
+        for piece: Piece,
+        sideToMove: Piece.Color
+    ) -> Int {
+        let kind: Int = switch piece.kind {
+        case .pawn: 0
+        case .knight: 1
+        case .bishop: 2
+        case .rook: 3
+        case .queen: 4
+        case .king: 5
+        }
+        let modelColor = sideToMove == .black ? piece.color.opposite : piece.color
+        return kind + (modelColor == .black ? 6 : 0)
+    }
+}
+
+enum Maia3MoveVocabulary {
+    static let count = 4_352
+    private static let promotionKinds: [Piece.Kind] = [.queen, .rook, .bishop, .knight]
+
+    static func legalMoves(fen: String) throws -> [String: Int] {
+        guard let position = Position(fen: fen) else {
+            throw ChessPlayingEngineError.invalidPosition
+        }
+
+        let sideToMove = position.sideToMove
+        let board = Board(position: position)
+        var result: [String: Int] = [:]
+
+        for piece in position.pieces where piece.color == sideToMove {
+            for target in board.legalMoves(forPieceAt: piece.square) {
+                var candidate = board
+                guard candidate.move(pieceAt: piece.square, to: target) != nil else { continue }
+
+                let base = piece.square.notation + target.notation
+                if case .promotion = candidate.state {
+                    for kind in promotionKinds {
+                        let uci = base + promotionSymbol(for: kind)
+                        if let index = vocabularyIndex(for: uci, sideToMove: sideToMove) {
+                            result[uci] = index
+                        }
+                    }
+                } else if let index = vocabularyIndex(for: base, sideToMove: sideToMove) {
+                    result[base] = index
+                }
+            }
+        }
+
+        return result
+    }
+
+    static func vocabularyIndex(for uci: String, sideToMove: Piece.Color) -> Int? {
+        let normalized = sideToMove == .black ? mirrorRanks(in: uci) : uci.lowercased()
+        guard let move = OTBExpectedMove(uci: normalized) else { return nil }
+
+        if let promotion = move.promotion {
+            guard move.from.rank.value == 7, move.to.rank.value == 8,
+                  let promotionIndex = promotionKinds.firstIndex(of: promotion)
+            else { return nil }
+            return 4_096
+                + (move.from.file.number - 1) * 32
+                + (move.to.file.number - 1) * 4
+                + promotionIndex
+        }
+
+        return move.from.rawValue * 64 + move.to.rawValue
+    }
+
+    private static func mirrorRanks(in uci: String) -> String {
+        let characters = Array(uci.lowercased())
+        guard characters.count == 4 || characters.count == 5,
+              let fromRank = characters[1].wholeNumberValue,
+              let toRank = characters[3].wholeNumberValue
+        else { return uci.lowercased() }
+
+        var mirrored = characters
+        mirrored[1] = Character(String(9 - fromRank))
+        mirrored[3] = Character(String(9 - toRank))
+        return String(mirrored)
+    }
+
+    private static func promotionSymbol(for kind: Piece.Kind) -> String {
+        switch kind {
+        case .queen: "q"
+        case .rook: "r"
+        case .bishop: "b"
+        case .knight: "n"
+        case .pawn, .king: ""
+        }
+    }
+}
+
+actor Maia3OpponentEngine: ChessPlayingEngine {
+    nonisolated let kind = OpponentEngineKind.maia3
+
+    private let predictor: any Maia3PolicyPredicting
+    private let randomUnitInterval: (@Sendable () -> Double)?
+    private var generation: UInt64 = 0
+
+    init(
+        predictor: any Maia3PolicyPredicting,
+        randomUnitInterval: (@Sendable () -> Double)? = nil
+    ) {
+        self.predictor = predictor
+        self.randomUnitInterval = randomUnitInterval
+    }
+
+    func move(for request: ChessPlayingRequest) async throws -> ChessPlayingMove {
+        guard request.configuration.kind == kind else {
+            throw ChessPlayingEngineError.inference("La configuración no corresponde a Maia 3.")
+        }
+        let strength = request.configuration.maia3Strength ?? Maia3Strength(rating: 800)
+        generation &+= 1
+        let requestGeneration = generation
+
+        try Task.checkCancellation()
+        let input = try Maia3InputEncoder.encode(
+            currentFEN: request.fen,
+            positionHistory: request.positionHistory,
+            rating: strength.rating
+        )
+        let logits = try await predictor.predict(input: input)
+        try Task.checkCancellation()
+        guard requestGeneration == generation else { throw CancellationError() }
+        guard logits.count == Maia3MoveVocabulary.count else {
+            throw ChessPlayingEngineError.inference(
+                "Maia 3 devolvió \(logits.count) logits; se esperaban \(Maia3MoveVocabulary.count)."
+            )
+        }
+
+        let indexedMoves = try Maia3MoveVocabulary.legalMoves(fen: request.fen)
+        let legalMoves = Set(indexedMoves.keys)
+        let legalLogits = Dictionary(uniqueKeysWithValues: indexedMoves.map { move, index in
+            (move, logits[index])
+        })
+        let selected = try MaiaMoveSampler.sample(
+            logits: legalLogits,
+            legalMoves: legalMoves,
+            temperature: strength.temperature,
+            topP: strength.topP,
+            unitInterval: randomValue(seed: strength.seed, fen: request.fen)
+        )
+
+        try Task.checkCancellation()
+        guard requestGeneration == generation else { throw CancellationError() }
+        _ = try OpponentMoveValidator.validatedMove(uci: selected, fen: request.fen)
+        return ChessPlayingMove(uci: selected)
+    }
+
+    func cancel() async {
+        generation &+= 1
+    }
+
+    private func randomValue(seed: UInt64?, fen: String) -> Double {
+        if let randomUnitInterval {
+            return min(max(randomUnitInterval(), 0), 1.0.nextDown)
+        }
+        guard let seed else { return Double.random(in: 0..<1) }
+
+        var hash = seed ^ 0xcbf29ce484222325
+        for byte in fen.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        hash &+= 0x9e3779b97f4a7c15
+        var mixed = hash
+        mixed = (mixed ^ (mixed >> 30)) &* 0xbf58476d1ce4e5b9
+        mixed = (mixed ^ (mixed >> 27)) &* 0x94d049bb133111eb
+        mixed ^= mixed >> 31
+        return Double(mixed >> 11) / Double(UInt64(1) << 53)
     }
 }

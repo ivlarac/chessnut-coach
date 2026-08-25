@@ -1,19 +1,44 @@
 Chessnut Coach
 Copyright 2026 ivlarac
 
-Original project:
+Combined application license
+----------------------------
+
+This version of Chessnut Coach, including its Maia 3 integration, is
+distributed as a combined work under the GNU Affero General Public License,
+version 3 only (AGPL-3.0-only). The complete license is in LICENSE.
+
+The complete corresponding source, build scripts and model-conversion script
+are published at:
 https://github.com/ivlarac/chessnut-coach
 
-The original Chessnut Coach code is licensed under the Apache License, Version 2.0.
-Redistributions and derivative works must preserve the applicable license,
-copyright, and attribution notices as required by that license.
+Earlier Chessnut Coach code
+---------------------------
 
-Third-party components are not relicensed by this NOTICE. They retain their
-respective copyright notices and license terms. In particular, the Stockfish
-source used by this project is included as the Vendor/Stockfish submodule and
-remains subject to the license provided by the Stockfish project.
+Chessnut Coach source published before the Maia 3 integration was made
+available under the Apache License, Version 2.0. Those prior grants and notices
+remain valid. A preserved copy is in LICENSES/Apache-2.0.txt.
 
-Maia 3 is not included in this distribution. Its official source and model
-weights were evaluated for a future optional opponent and are published by the
-University of Toronto CSSLab under GNU AGPL-3.0; see MAIA3_INTEGRATION.md. No
-Maia source code, converted model or model weights are bundled here.
+Maia 3 and Maia3-5M
+-------------------
+
+Maia 3 source code and the Maia3-5M checkpoint are provided by the University
+of Toronto CSSLab under GNU AGPL-3.0.
+
+Official source: https://github.com/CSSLab/maia3
+Official model: https://huggingface.co/UofTCSSLab/Maia3-5M
+Vendored source revision: 1e13597c42d4858b7cfd7cfdae01e297263364b2
+Model revision: b6559de2398d7140b985f28fd2c19fb5e47ddabe
+
+Chessnut Coach converts the official checkpoint to Core ML FP16 and adds
+on-device input preparation, legal-move masking and policy sampling. These are
+modifications made in August 2026; no claim of endorsement by CSSLab is made.
+
+Stockfish
+---------
+
+Stockfish 18 is included through Vendor/Stockfish and remains licensed under
+GNU GPL v3 or later. Its copyright and license notices remain applicable.
+
+Third-party components retain their own copyright and license terms. Nothing
+in this NOTICE removes or replaces those notices.

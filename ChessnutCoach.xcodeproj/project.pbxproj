@@ -30,6 +30,8 @@
 		A10000000000000000000015 /* GameAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* GameAnalysis.swift */; };
 		A10000000000000000000016 /* GameAnalysisWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* GameAnalysisWorkspace.swift */; };
 		A10000000000000000000017 /* OpponentEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* OpponentEngine.swift */; };
+		A10000000000000000000018 /* Maia3CoreMLEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* Maia3CoreMLEngine.swift */; };
+		A10000000000000000000019 /* Maia3_5M.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* Maia3_5M.mlpackage */; };
 		A20000000000000000000001 /* OTBGameSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* OTBGameSessionTests.swift */; };
 		A20000000000000000000002 /* ChessKit in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000003 /* ChessKit */; };
 		A20000000000000000000003 /* GameAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* GameAnalysisTests.swift */; };
@@ -69,6 +71,8 @@
 		B10000000000000000000015 /* GameAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameAnalysis.swift; sourceTree = "<group>"; };
 		B10000000000000000000016 /* GameAnalysisWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameAnalysisWorkspace.swift; sourceTree = "<group>"; };
 		B10000000000000000000017 /* OpponentEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpponentEngine.swift; sourceTree = "<group>"; };
+		B10000000000000000000018 /* Maia3CoreMLEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Maia3CoreMLEngine.swift; sourceTree = "<group>"; };
+		B10000000000000000000019 /* Maia3_5M.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = Models/Maia3_5M.mlpackage; sourceTree = "<group>"; };
 		B20000000000000000000001 /* OTBGameSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OTBGameSessionTests.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* GameAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameAnalysisTests.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* ChessnutCoachTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChessnutCoachTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -114,6 +118,8 @@
 				B10000000000000000000010 /* DiagnosticsView.swift */,
 				B10000000000000000000003 /* BoardController.swift */,
 				B10000000000000000000017 /* OpponentEngine.swift */,
+				B10000000000000000000018 /* Maia3CoreMLEngine.swift */,
+				B10000000000000000000019 /* Maia3_5M.mlpackage */,
 				B10000000000000000000006 /* GameModels.swift */,
 				B10000000000000000000005 /* OTBGameSession.swift */,
 				B1000000000000000000000B /* GameArchive.swift */,
@@ -307,6 +313,8 @@
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* BoardController.swift in Sources */,
 				A10000000000000000000017 /* OpponentEngine.swift in Sources */,
+				A10000000000000000000018 /* Maia3CoreMLEngine.swift in Sources */,
+				A10000000000000000000019 /* Maia3_5M.mlpackage in Sources */,
 				A10000000000000000000007 /* GameModels.swift in Sources */,
 				A10000000000000000000005 /* OTBGameSession.swift in Sources */,
 				A10000000000000000000008 /* StockfishEngine.swift in Sources */,
