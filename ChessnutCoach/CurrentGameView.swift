@@ -195,12 +195,25 @@ struct CurrentGameView: View {
                 .accessibilityHint("Alterna qué color se muestra en la parte inferior")
             }
 
+            if board.hasActiveGame && board.isClockEnabled {
+                boardClockBar(for: topBoardSide)
+            }
+
             OnScreenChessBoard(
                 board: board,
                 perspective: boardPerspective,
                 isInteractive: isScreenBoardInteractive
             )
                 .aspectRatio(1, contentMode: .fit)
+
+            if board.hasActiveGame && board.isClockEnabled {
+                boardClockBar(for: bottomBoardSide)
+            } else if board.hasActiveGame {
+                Label("Partida ilimitada · Sin reloj", systemImage: "infinity")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if board.isConnected {
                 Text("Mueve las piezas únicamente en el tablero físico. El tablero virtual refleja la posición y las ayudas, pero no admite movimientos mientras Bluetooth esté conectado.")
@@ -230,6 +243,75 @@ struct CurrentGameView: View {
                 .foregroundStyle(.green)
             }
         }
+    }
+
+    private var topBoardSide: PlayerSide {
+        boardPerspective == .whiteAtBottom ? .black : .white
+    }
+
+    private var bottomBoardSide: PlayerSide {
+        topBoardSide == .white ? .black : .white
+    }
+
+    private func boardClockBar(for side: PlayerSide) -> some View {
+        let isWhite = side == .white
+        let clockText = isWhite ? board.whiteClockText : board.blackClockText
+        let playerName = isWhite ? board.whitePlayerName : board.blackPlayerName
+        let isActive = board.activeClockSide == side
+        let isLow = isWhite ? board.isWhiteLowOnTime : board.isBlackLowOnTime
+
+        return HStack(spacing: 12) {
+            Image(systemName: "circle.fill")
+                .foregroundStyle(isWhite ? Color.white : Color.black)
+                .shadow(color: .primary.opacity(0.45), radius: isWhite ? 1 : 0)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playerName)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(side.displayText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            if isActive {
+                Image(systemName: "play.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(isLow ? Color.red : Color.coachAccent)
+                    .accessibilityHidden(true)
+            }
+
+            Text(clockText)
+                .font(.system(.title, design: .monospaced).weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(isLow ? Color.red : Color.primary)
+                .minimumScaleFactor(0.75)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    isActive
+                        ? Color.coachAccent.opacity(0.16)
+                        : Color(uiColor: .tertiarySystemGroupedBackground)
+                )
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(
+                    isActive ? Color.coachAccent : Color.primary.opacity(0.1),
+                    lineWidth: isActive ? 2 : 1
+                )
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(side.displayText), \(playerName), \(clockText)"
+                + (isActive ? ", reloj activo" : "")
+        )
     }
 
     private var gameCard: some View {
@@ -278,14 +360,28 @@ struct CurrentGameView: View {
             playerSummary(
                 title: "Blancas",
                 name: board.whitePlayerName,
-                symbolColor: .white
+                symbolColor: .white,
+                side: .white
             )
             Divider()
             playerSummary(
                 title: "Negras",
                 name: board.blackPlayerName,
-                symbolColor: .black
+                symbolColor: .black,
+                side: .black
             )
+        }
+
+        if board.isClockEnabled {
+            if let pauseLabel = board.clockPauseLabel {
+                Label(pauseLabel, systemImage: "pause.circle.fill")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Label("Ilimitado · Sin reloj", systemImage: "infinity")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
         }
 
         if board.isSoloGame {
@@ -503,23 +599,51 @@ struct CurrentGameView: View {
     private func playerSummary(
         title: String,
         name: String,
-        symbolColor: Color
+        symbolColor: Color,
+        side: PlayerSide
     ) -> some View {
-        HStack(spacing: 12) {
+        let clockText = side == .white ? board.whiteClockText : board.blackClockText
+        let isActive = board.activeClockSide == side
+        let isLow = side == .white ? board.isWhiteLowOnTime : board.isBlackLowOnTime
+
+        return HStack(spacing: 12) {
             Image(systemName: "circle.fill")
                 .foregroundStyle(symbolColor)
                 .shadow(color: .primary.opacity(0.35), radius: symbolColor == .white ? 1 : 0)
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .frame(width: 62, alignment: .leading)
-            Spacer(minLength: 8)
-            Text(name)
-                .font(.body.weight(.medium))
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(name)
+                    .font(.body.weight(.medium))
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+
+                if board.isClockEnabled {
+                    Text(clockText)
+                        .font(.system(.title2, design: .monospaced).weight(.bold))
+                        .foregroundStyle(isLow ? Color.red : Color.primary)
+                }
+            }
+        }
+        .padding(.vertical, board.isClockEnabled ? 8 : 0)
+        .padding(.horizontal, board.isClockEnabled ? 10 : 0)
+        .background {
+            if board.isClockEnabled {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isActive ? Color.coachAccent.opacity(0.14) : Color.clear)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(isActive ? Color.coachAccent.opacity(0.55) : Color.clear, lineWidth: 1)
+                    }
+            }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title): \(name)")
+        .accessibilityLabel(
+            board.isClockEnabled
+                ? "\(title): \(name), \(clockText)\(isActive ? ", reloj activo" : "")"
+                : "\(title): \(name)"
+        )
     }
 
     private func metric(title: String, value: String) -> some View {
@@ -836,6 +960,7 @@ private struct OnScreenChessBoard: View {
 
 private struct NewGameSetupView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var draft: NewGameDraft
 
     let isPhysicalBoardConnected: Bool
@@ -896,6 +1021,8 @@ private struct NewGameSetupView: View {
                         .foregroundStyle(.secondary)
                     }
                 }
+
+                timeControlSection
 
                 if draft.mode == .solo {
                     Section("Motor rival") {
@@ -1068,6 +1195,10 @@ private struct NewGameSetupView: View {
                 Section("Resumen") {
                     LabeledContent("Partida", value: draft.mode.displayText)
                     LabeledContent("Jugadores", value: playersSummary)
+                    LabeledContent(
+                        "Tiempo",
+                        value: draft.resolvedTimeControl?.summaryText ?? "Configuración inválida"
+                    )
                     if draft.mode == .solo {
                         LabeledContent("Motor", value: draft.opponentEngineConfiguration.displayName)
                     }
@@ -1100,6 +1231,66 @@ private struct NewGameSetupView: View {
         }
     }
 
+    private var timeControlSection: some View {
+        Section("Tiempo de partida") {
+            LazyVGrid(columns: timeGridColumns, spacing: 10) {
+                ForEach(GameTimePreset.allCases) { preset in
+                    timePresetCard(preset)
+                }
+            }
+            .padding(.vertical, 5)
+
+            if draft.timePreset == .custom {
+                LabeledContent("Minutos por jugador") {
+                    TextField(
+                        "Minutos",
+                        value: $draft.customInitialMinutes,
+                        format: .number
+                    )
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(minWidth: 64)
+                }
+
+                LabeledContent("Incremento por jugada") {
+                    HStack(spacing: 4) {
+                        TextField(
+                            "Segundos",
+                            value: $draft.customIncrementSeconds,
+                            format: .number
+                        )
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        Text("s")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(minWidth: 72)
+                }
+
+                if draft.resolvedTimeControl == nil {
+                    Label(
+                        "Usa entre \(GameTimeLimits.initialMinutes.lowerBound) y \(GameTimeLimits.initialMinutes.upperBound) minutos, y entre \(GameTimeLimits.incrementSeconds.lowerBound) y \(GameTimeLimits.incrementSeconds.upperBound) segundos de incremento.",
+                        systemImage: "exclamationmark.circle"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                }
+            }
+
+            Text("El incremento Fischer se añade al completar una jugada legal. Ilimitado conserva el funcionamiento sin reloj.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var timeGridColumns: [GridItem] {
+        let count = dynamicTypeSize.isAccessibilitySize ? 1 : 3
+        return Array(
+            repeating: GridItem(.flexible(minimum: 72), spacing: 10),
+            count: count
+        )
+    }
+
     private var soloTurnExplanation: String {
         let opponent = draft.opponentEngineConfiguration.displayName
         return switch draft.sideChoice {
@@ -1119,6 +1310,57 @@ private struct NewGameSetupView: View {
         case .solo:
             "\(draft.humanPlayerName.trimmingCharacters(in: .whitespacesAndNewlines)) – \(draft.opponentEngineConfiguration.displayName)"
         }
+    }
+
+    private func timePresetCard(_ preset: GameTimePreset) -> some View {
+        let isSelected = draft.timePreset == preset
+        return Button {
+            draft.timePreset = preset
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                VStack(spacing: 5) {
+                    Text(preset.notation)
+                        .font(
+                            preset == .custom
+                                ? .subheadline.weight(.semibold)
+                                : .title2.weight(.bold)
+                        )
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
+                    Text(preset.categoryText)
+                        .font(.caption)
+                        .foregroundStyle(isSelected ? Color.coachAccent : Color.secondary)
+                        .minimumScaleFactor(0.75)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, minHeight: 76)
+                .padding(.horizontal, 5)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.coachAccent)
+                        .padding(6)
+                        .accessibilityHidden(true)
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color.coachAccent.opacity(0.16)
+                            : Color(uiColor: .secondarySystemGroupedBackground)
+                    )
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? Color.coachAccent : Color.secondary.opacity(0.25), lineWidth: isSelected ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(preset.notation), \(preset.categoryText)")
+        .accessibilityValue(isSelected ? "Seleccionado" : "No seleccionado")
+        .accessibilityHint("Selecciona este control de tiempo")
     }
 
     private func playerNameField(

@@ -75,6 +75,14 @@ final class BoardController: ObservableObject {
     @Published private(set) var hasActiveGame = false
     @Published private(set) var screenHints: [LEDHint] = []
     @Published private(set) var screenPromotionRequest: ScreenPromotionRequest?
+    @Published private(set) var timeControlLabel = "Ilimitado"
+    @Published private(set) var isClockEnabled = false
+    @Published private(set) var whiteClockText = ""
+    @Published private(set) var blackClockText = ""
+    @Published private(set) var activeClockSide: PlayerSide?
+    @Published private(set) var clockPauseLabel: String?
+    @Published private(set) var isWhiteLowOnTime = false
+    @Published private(set) var isBlackLowOnTime = false
 
     @Published private(set) var assistanceSettings = AssistanceSettings()
     @Published private(set) var activeHintSummary = ""
@@ -123,7 +131,10 @@ final class BoardController: ObservableObject {
     private let stockfishCoach = StockfishMoveCoach()
     private var turnAssistancePolicy = TurnAssistanceAccessPolicy()
     private let opponentEngineBuilder: @Sendable (OpponentEngineConfiguration) throws -> any ChessPlayingEngine
+    private let nowProvider: () -> Date
+    private let engineDelaySleeper: @Sendable (Duration) async throws -> Void
     private weak var gameLibrary: GameLibrary?
+    private var clockRefreshCancellable: AnyCancellable?
 
     private var currentStockfishHints: [StockfishMoveHint] = []
     private var currentStockfishHintFEN: String?
@@ -157,6 +168,10 @@ final class BoardController: ObservableObject {
         boardDiscovery: any ElectronicChessBoardDiscovery = DefaultElectronicBoardDiscovery(),
         adapterRegistry: ElectronicBoardAdapterRegistry = .appDefault,
         preferences: UserDefaults = .standard,
+        nowProvider: @escaping () -> Date = { Date() },
+        engineDelaySleeper: @escaping @Sendable (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        },
         opponentEngineBuilder: @escaping @Sendable (OpponentEngineConfiguration) throws -> any ChessPlayingEngine = {
             configuration in
             switch configuration.kind {
@@ -169,6 +184,8 @@ final class BoardController: ObservableObject {
         self.boardDiscovery = boardDiscovery
         self.adapterRegistry = adapterRegistry
         self.preferences = preferences
+        self.nowProvider = nowProvider
+        self.engineDelaySleeper = engineDelaySleeper
         self.opponentEngineBuilder = opponentEngineBuilder
 
         if let savedSettings = Self.loadAssistanceSettings(from: preferences) {
@@ -180,7 +197,12 @@ final class BoardController: ObservableObject {
            let restoredSession = try? OTBGameSession(restoring: savedGame) {
             gameSession = restoredSession
             hasActiveGame = true
-            gameStatus = "Partida recuperada. Puedes continuar en pantalla o conectar un tablero físico."
+            if gameSession.processClockTimeoutIfNeeded(at: nowProvider()) != nil {
+                gameStatus = gameSession.result.displayText
+                library?.upsert(gameSession.gameRecord)
+            } else {
+                gameStatus = "Partida recuperada. Puedes continuar en pantalla o conectar un tablero físico."
+            }
         }
 
         publishGameState()
@@ -190,6 +212,12 @@ final class BoardController: ObservableObject {
         } else {
             gameStatus = idleGameStatus
         }
+
+        clockRefreshCancellable = Timer.publish(every: 0.1, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.refreshClockFromRealTime()
+            }
     }
 
     func connect() {
@@ -396,6 +424,13 @@ final class BoardController: ObservableObject {
             invalidateTransientAssistance(turnOffLEDs: isConnected)
         }
 
+        if phase == .background {
+            refreshClockFromRealTime()
+            persistCurrentGameIfNeeded()
+        } else if phase == .active {
+            refreshClockFromRealTime()
+        }
+
         if directive.probeConnection, shouldMaintainConnection {
             if isConnected {
                 probeConnectionAndRequestFreshSnapshot(
@@ -453,6 +488,7 @@ final class BoardController: ObservableObject {
         }
 
         gameSession.reset(
+            startedAt: nowProvider(),
             whitePlayer: white,
             blackPlayer: black,
             mode: configuration.mode,
@@ -462,7 +498,8 @@ final class BoardController: ObservableObject {
                 ? opponentConfiguration.stockfishStrength
                 : nil,
             engineName: configuration.mode == .solo ? engineName : nil,
-            allowUndo: configuration.mode == .twoPlayer && configuration.allowUndo
+            allowUndo: configuration.mode == .twoPlayer && configuration.allowUndo,
+            timeControl: configuration.timeControl
         )
         hasActiveGame = true
         configureOpponentEngineIfNeeded()
@@ -540,7 +577,10 @@ final class BoardController: ObservableObject {
 
     func undoLastMove() {
         guard hasActiveGame,
-              let undoneMove = gameSession.undoLastMove(awaitPhysicalRestore: isConnected)
+              let undoneMove = gameSession.undoLastMove(
+                awaitPhysicalRestore: isConnected,
+                at: nowProvider()
+              )
         else { return }
 
         invalidateTransientAssistance(turnOffLEDs: isConnected)
@@ -563,21 +603,21 @@ final class BoardController: ObservableObject {
         let resigningColor = gameMode == .solo
             ? (humanSide?.pieceColor ?? gameSession.sideToMove)
             : gameSession.sideToMove
-        _ = gameSession.resign(color: resigningColor)
+        _ = gameSession.resign(color: resigningColor, at: nowProvider())
         persistCurrentGameIfNeeded()
         returnToIdleState()
     }
 
     func agreeDraw() {
         guard hasActiveGame, !gameSession.isFinished else { return }
-        _ = gameSession.agreeDraw()
+        _ = gameSession.agreeDraw(at: nowProvider())
         persistCurrentGameIfNeeded()
         returnToIdleState()
     }
 
     func abortGame() {
         guard hasActiveGame, !gameSession.isFinished else { return }
-        gameSession.abort()
+        gameSession.abort(at: nowProvider())
         persistCurrentGameIfNeeded()
         returnToIdleState()
     }
@@ -890,8 +930,15 @@ final class BoardController: ObservableObject {
         } else {
             event = gameSession.process(
                 physicalPlacement: placement,
+                at: nowProvider(),
                 requiredMove: wasEngineTurn ? engineSuggestion?.move : nil
             )
+        }
+
+        if case .synchronized = event {
+            gameSession.startClockIfNeeded(at: nowProvider())
+            gameSession.resumeClockAfterSynchronization(at: nowProvider())
+            persistCurrentGameIfNeeded()
         }
 
         if case .moveCompleted = event, wasEngineTurn {
@@ -907,6 +954,18 @@ final class BoardController: ObservableObject {
             persistAfterUndo()
         default:
             break
+        }
+
+        if gameSession.isFinished, gameSession.result.isTimeoutResult {
+            persistCurrentGameIfNeeded()
+            gameStatus = gameSession.result.displayText
+            do {
+                try await client.setLEDs(.allOff)
+            } catch {
+                status = "Conexión BLE interrumpida: \(error.localizedDescription)"
+                handleClientFailure(error, client: client)
+            }
+            return
         }
 
         if case .moveCompleted = event, gameSession.isFinished {
@@ -1309,6 +1368,7 @@ final class BoardController: ObservableObject {
         }
         isEngineThinking = true
         gameStatus = "\(opponentDisplayName) está calculando su jugada (\(configuration.strengthDisplayText))…"
+        let searchStartedAt = nowProvider()
 
         engineMoveTask = Task { [weak self] in
             guard let self else { return }
@@ -1338,8 +1398,25 @@ final class BoardController: ObservableObject {
                       self.isEngineTurn
                 else { return }
 
+                try await self.waitForEnginePacing(searchStartedAt: searchStartedAt)
+                try Task.checkCancellation()
+                guard self.engineMoveGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.isEngineTurn
+                else { return }
+
                 let suggestion = SoloEngineSuggestion(move: expectedMove)
+                let responseDate = self.nowProvider()
+                if self.gameSession.processClockTimeoutIfNeeded(at: responseDate) != nil {
+                    self.publishGameState()
+                    self.persistCurrentGameIfNeeded()
+                    self.gameStatus = self.gameSession.result.displayText
+                    return
+                }
+                self.gameSession.pauseClockForEngineMoveTransfer(at: responseDate)
                 self.engineSuggestion = suggestion
+                self.publishGameState()
+                self.persistCurrentGameIfNeeded()
                 self.gameStatus = "Turno de \(self.opponentDisplayName): ejecuta \(suggestion.displayText) en el tablero."
                 self.activeHintSummary = "\(self.opponentDisplayName): \(suggestion.displayText) · origen fijo · destino intermitente"
                 if self.client === client, self.isConnected {
@@ -1362,6 +1439,22 @@ final class BoardController: ObservableObject {
             ],
             client: client
         )
+    }
+
+    private func waitForEnginePacing(searchStartedAt: Date) async throws {
+        let measuredAt = nowProvider()
+        let engineSide: PlayerSide = gameSession.sideToMove == .white ? .white : .black
+        let remaining = gameSession.clockRemaining(for: engineSide, at: measuredAt)
+        let delay = EngineMovePacing.additionalDelay(
+            timeControl: gameSession.timeControl,
+            remaining: remaining,
+            completedMoveCount: gameSession.moves.count,
+            computationDuration: measuredAt.timeIntervalSince(searchStartedAt)
+        )
+
+        guard delay >= 0.01 else { return }
+        let milliseconds = Int64((delay * 1_000).rounded())
+        try await engineDelaySleeper(.milliseconds(milliseconds))
     }
 
     private func cancelEngineMoveRequest(clearSuggestion: Bool) {
@@ -1495,6 +1588,7 @@ final class BoardController: ObservableObject {
         engineStrength = opponentEngineConfiguration?.stockfishStrength
         isUndoAllowed = gameSession.gameRecord.mode == .twoPlayer && gameSession.gameRecord.allowUndo
         canUndoMove = gameSession.canUndoLastMove
+        publishClockState(at: nowProvider())
 
         if !hasActiveGame {
             sideToMoveLabel = "—"
@@ -1514,7 +1608,56 @@ final class BoardController: ObservableObject {
             canUndoMove = false
             screenHints = []
             screenPromotionRequest = nil
+            timeControlLabel = "Ilimitado"
+            isClockEnabled = false
+            whiteClockText = ""
+            blackClockText = ""
+            activeClockSide = nil
+            clockPauseLabel = nil
+            isWhiteLowOnTime = false
+            isBlackLowOnTime = false
         }
+    }
+
+    private func publishClockState(at date: Date) {
+        timeControlLabel = gameSession.timeControl.summaryText
+        guard let clock = gameSession.clockState else {
+            isClockEnabled = false
+            whiteClockText = ""
+            blackClockText = ""
+            activeClockSide = nil
+            clockPauseLabel = nil
+            isWhiteLowOnTime = false
+            isBlackLowOnTime = false
+            return
+        }
+
+        let whiteRemaining = clock.remaining(for: .white, at: date)
+        let blackRemaining = clock.remaining(for: .black, at: date)
+        isClockEnabled = true
+        whiteClockText = GameClockFormatter.string(for: whiteRemaining)
+        blackClockText = GameClockFormatter.string(for: blackRemaining)
+        activeClockSide = clock.isRunning ? clock.activeSide : nil
+        clockPauseLabel = clock.pauseReason?.displayText
+        isWhiteLowOnTime = clock.activeSide == .white && whiteRemaining <= 30
+        isBlackLowOnTime = clock.activeSide == .black && blackRemaining <= 30
+    }
+
+    private func refreshClockFromRealTime() {
+        guard hasActiveGame, gameSession.timeControl.isTimed else { return }
+        let date = nowProvider()
+
+        if gameSession.processClockTimeoutIfNeeded(at: date) != nil {
+            invalidateTransientAssistance(turnOffLEDs: isConnected)
+            cancelEngineMoveRequest(clearSuggestion: true)
+            screenPromotionRequest = nil
+            publishGameState()
+            persistCurrentGameIfNeeded()
+            gameStatus = gameSession.result.displayText
+            return
+        }
+
+        publishClockState(at: date)
     }
 
     private func formattedMoveHistory(_ moves: [GameMoveRecord]) -> [String] {
@@ -1535,7 +1678,9 @@ final class BoardController: ObservableObject {
     }
 
     private func persistCurrentGameIfNeeded() {
-        guard hasActiveGame, !gameSession.moves.isEmpty else { return }
+        guard hasActiveGame,
+              !gameSession.moves.isEmpty || gameSession.timeControl.isTimed
+        else { return }
         gameLibrary?.upsert(gameSession.gameRecord)
     }
 
@@ -1551,7 +1696,9 @@ final class BoardController: ObservableObject {
 
     private func persistAfterUndo() {
         guard hasActiveGame else { return }
-        if gameSession.gameRecord.mode == .twoPlayer && gameSession.moves.isEmpty {
+        if gameSession.gameRecord.mode == .twoPlayer,
+           gameSession.moves.isEmpty,
+           !gameSession.timeControl.isTimed {
             gameLibrary?.delete(gameSession.gameRecord)
         } else {
             persistCurrentGameIfNeeded()
@@ -1741,9 +1888,15 @@ extension BoardController {
         screenPromotionRequest = nil
 
         if !gameSession.isSynchronized {
-            _ = gameSession.process(physicalPlacement: gameSession.logicalPlacement)
-            publishGameState()
+            _ = gameSession.process(
+                physicalPlacement: gameSession.logicalPlacement,
+                at: nowProvider()
+            )
         }
+        gameSession.startClockIfNeeded(at: nowProvider())
+        gameSession.resumeClockForVirtualBoard(at: nowProvider())
+        publishGameState()
+        persistCurrentGameIfNeeded()
 
         if isEngineTurn {
             scheduleScreenEngineMoveIfNeeded()
@@ -1924,6 +2077,7 @@ extension BoardController {
 
         let event = gameSession.process(
             physicalPlacement: candidate.position.fen,
+            at: nowProvider(),
             requiredMove: requiredMove
         )
 
@@ -1931,6 +2085,13 @@ extension BoardController {
         turnAssistancePolicy.handle(event)
 
         publishGameState()
+
+        if gameSession.isFinished, gameSession.result.isTimeoutResult {
+            cancelEngineMoveRequest(clearSuggestion: true)
+            persistCurrentGameIfNeeded()
+            gameStatus = gameSession.result.displayText
+            return
+        }
 
         switch event {
         case let .moveCompleted(move):
@@ -1996,6 +2157,7 @@ extension BoardController {
         }
         isEngineThinking = true
         gameStatus = "\(opponentDisplayName) está calculando su jugada (\(configuration.strengthDisplayText))…"
+        let searchStartedAt = nowProvider()
 
         engineMoveTask = Task { [weak self] in
             guard let self else { return }
@@ -2019,6 +2181,14 @@ extension BoardController {
                     uci: response.uci,
                     fen: fen
                 )
+                try Task.checkCancellation()
+                guard !self.isConnected,
+                      self.engineMoveGeneration == generation,
+                      self.logicalFEN == fen,
+                      self.isEngineTurn
+                else { return }
+
+                try await self.waitForEnginePacing(searchStartedAt: searchStartedAt)
                 try Task.checkCancellation()
                 guard !self.isConnected,
                       self.engineMoveGeneration == generation,

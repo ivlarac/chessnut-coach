@@ -59,7 +59,7 @@ final class GameLibrary: ObservableObject {
 
     var resumableGame: GameRecord? {
         games.first {
-            $0.status == .playing && !$0.moves.isEmpty
+            $0.status == .playing && (!$0.moves.isEmpty || $0.timeControl.isTimed)
         }
     }
 

@@ -158,6 +158,7 @@ struct NewGameConfiguration: Equatable, Sendable {
     var opponentEngine: OpponentEngineConfiguration = .stockfish(StockfishStrength(level: 4))
     var assistance: AssistanceSettings = AssistanceSettings()
     var allowUndo: Bool = false
+    var timeControl: GameTimeControl = .unlimited
     var whitePlayerName: String?
     var blackPlayerName: String?
 
@@ -173,6 +174,7 @@ struct NewGameConfiguration: Equatable, Sendable {
         opponentEngine: OpponentEngineConfiguration? = nil,
         assistance: AssistanceSettings = AssistanceSettings(),
         allowUndo: Bool = false,
+        timeControl: GameTimeControl = .unlimited,
         whitePlayerName: String? = nil,
         blackPlayerName: String? = nil
     ) {
@@ -181,6 +183,7 @@ struct NewGameConfiguration: Equatable, Sendable {
         self.opponentEngine = opponentEngine ?? .stockfish(strength)
         self.assistance = assistance
         self.allowUndo = allowUndo
+        self.timeControl = timeControl
         self.whitePlayerName = whitePlayerName
         self.blackPlayerName = blackPlayerName
     }
@@ -210,6 +213,9 @@ struct NewGameDraft: Equatable, Sendable {
     var blunderThreshold: BlunderThreshold
     var allowUndo = false
     var automaticBoardRotation = false
+    var timePreset = GameTimePreset.unlimited
+    var customInitialMinutes = 5
+    var customIncrementSeconds = 0
 
     init(
         whitePlayerName: String,
@@ -245,11 +251,22 @@ struct NewGameDraft: Equatable, Sendable {
     }
 
     var canLaunch: Bool {
-        canStart && (mode != .solo || opponentEngineKind.isPlayableInThisBuild)
+        canStart
+            && resolvedTimeControl != nil
+            && (mode != .solo || opponentEngineKind.isPlayableInThisBuild)
+    }
+
+    var resolvedTimeControl: GameTimeControl? {
+        timePreset == .custom
+            ? GameTimeLimits.customControl(
+                initialMinutes: customInitialMinutes,
+                incrementSeconds: customIncrementSeconds
+            )
+            : timePreset.timeControl
     }
 
     func makeLaunch(randomValue: Bool = Bool.random()) -> NewGameLaunch? {
-        guard canLaunch else { return nil }
+        guard canLaunch, let timeControl = resolvedTimeControl else { return nil }
 
         let humanSide = sideChoice.resolvedSide(randomValue: randomValue)
         let assistance = mode == .solo
@@ -282,6 +299,7 @@ struct NewGameDraft: Equatable, Sendable {
                 opponentEngine: opponent,
                 assistance: assistance,
                 allowUndo: mode == .twoPlayer && allowUndo,
+                timeControl: timeControl,
                 whitePlayerName: whiteName,
                 blackPlayerName: blackName
             ),
@@ -361,6 +379,7 @@ enum WhitePositionEvaluation: Equatable, Sendable {
 enum GameEndReason: String, Codable, Sendable {
     case checkmate
     case resignation
+    case timeout
 }
 
 enum GameDrawReason: String, Codable, Sendable {
@@ -402,6 +421,13 @@ enum GameResult: Equatable, Codable, Sendable {
             "½-½ · Tablas por \(reason.displayText)"
         }
     }
+
+    var isTimeoutResult: Bool {
+        switch self {
+        case .whiteWin(reason: .timeout), .blackWin(reason: .timeout): true
+        default: false
+        }
+    }
 }
 
 extension GameEndReason {
@@ -409,6 +435,7 @@ extension GameEndReason {
         switch self {
         case .checkmate: "jaque mate"
         case .resignation: "abandono"
+        case .timeout: "tiempo"
         }
     }
 }
@@ -437,6 +464,7 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
     let playedAt: Date
     let promotion: String?
     let participant: MoveParticipant?
+    let clockAfterMove: GameMoveClockStamp?
 
     init(
         id: UUID = UUID(),
@@ -449,7 +477,8 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
         fenAfter: String,
         playedAt: Date = Date(),
         promotion: String? = nil,
-        participant: MoveParticipant? = nil
+        participant: MoveParticipant? = nil,
+        clockAfterMove: GameMoveClockStamp? = nil
     ) {
         self.id = id
         self.ply = ply
@@ -462,6 +491,16 @@ struct GameMoveRecord: Identifiable, Equatable, Codable, Sendable {
         self.playedAt = playedAt
         self.promotion = promotion
         self.participant = participant
+        self.clockAfterMove = clockAfterMove
+    }
+
+    var moverSide: PlayerSide {
+        let fields = fenBefore.split(separator: " ")
+        return fields.count > 1 && fields[1] == "b" ? .black : .white
+    }
+
+    var moverClockRemaining: TimeInterval? {
+        clockAfterMove?.remaining(for: moverSide)
     }
 }
 
@@ -482,6 +521,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
     var engineStrength: StockfishStrength?
     var engineName: String?
     var allowUndo: Bool
+    var timeControl: GameTimeControl
+    var clockState: GameClockState?
     var analysisVariations: [AnalysisVariationNode]
 
     init(
@@ -500,6 +541,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         engineStrength: StockfishStrength? = nil,
         engineName: String? = nil,
         allowUndo: Bool = false,
+        timeControl: GameTimeControl = .unlimited,
+        clockState: GameClockState? = nil,
         analysisVariations: [AnalysisVariationNode] = []
     ) {
         self.id = id
@@ -522,6 +565,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         self.engineStrength = engineStrength ?? migratedOpponent?.stockfishStrength
         self.engineName = engineName ?? migratedOpponent?.displayName
         self.allowUndo = allowUndo
+        self.timeControl = timeControl
+        self.clockState = clockState ?? (timeControl.isTimed ? GameClockState(timeControl: timeControl) : nil)
         self.analysisVariations = analysisVariations
     }
 
@@ -534,6 +579,18 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
 
     var duration: TimeInterval {
         max(0, lastActivityAt.timeIntervalSince(startedAt))
+    }
+
+    func clockStamp(afterPly ply: Int) -> GameMoveClockStamp? {
+        guard timeControl.isTimed else { return nil }
+        if ply <= 0 {
+            let initial = TimeInterval(timeControl.initialSeconds ?? 0)
+            return GameMoveClockStamp(
+                whiteRemaining: initial,
+                blackRemaining: initial
+            )
+        }
+        return moves.first(where: { $0.ply == min(ply, moves.count) })?.clockAfterMove
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -552,6 +609,8 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         case engineStrength
         case engineName
         case allowUndo
+        case timeControl
+        case clockState
         case analysisVariations
     }
 
@@ -581,6 +640,11 @@ struct GameRecord: Identifiable, Equatable, Codable, Sendable {
         engineStrength = legacyStrength ?? opponentEngine?.stockfishStrength
         engineName = legacyName ?? opponentEngine?.displayName
         allowUndo = try container.decodeIfPresent(Bool.self, forKey: .allowUndo) ?? false
+        timeControl = try container.decodeIfPresent(GameTimeControl.self, forKey: .timeControl) ?? .unlimited
+        clockState = try container.decodeIfPresent(GameClockState.self, forKey: .clockState)
+        if timeControl.isTimed, clockState == nil {
+            clockState = GameClockState(timeControl: timeControl)
+        }
         analysisVariations = try container.decodeIfPresent(
             [AnalysisVariationNode].self,
             forKey: .analysisVariations
